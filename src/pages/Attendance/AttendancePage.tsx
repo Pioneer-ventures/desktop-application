@@ -1,13 +1,12 @@
 /**
  * Attendance Page
- * Role-aware attendance page with self-attendance and list views
  */
 
 import React from 'react';
 import { authStore } from '@/store/authStore';
-import { SelfAttendance } from '@/components/Attendance/SelfAttendance';
-import { AttendanceList } from '@/components/Attendance/AttendanceList';
 import { UserRole } from '@/types';
+import { SelfAttendance } from '@/features/attendance/components/SelfAttendance';
+import { AttendanceList } from '@/features/attendance/components/AttendanceList';
 import './AttendancePage.css';
 
 export const AttendancePage: React.FC = () => {
@@ -17,9 +16,8 @@ export const AttendancePage: React.FC = () => {
     return null;
   }
 
-  // Determine if user can mark attendance
-  // Employee, Manager, HR can mark attendance
-  // Admin CANNOT mark attendance
+  // Only employees can mark their own attendance
+  // Admins can view but not mark
   const canMarkAttendance = 
     user.role === UserRole.EMPLOYEE ||
     user.role === UserRole.MANAGER ||
@@ -39,6 +37,7 @@ export const AttendancePage: React.FC = () => {
     <div className="attendance-page">
       <div className="attendance-page-header">
         <h1>Attendance</h1>
+        <p className="page-subtitle">Manage your daily attendance</p>
       </div>
 
       {/* Self Attendance Section - Always visible */}
@@ -51,4 +50,3 @@ export const AttendancePage: React.FC = () => {
     </div>
   );
 };
-

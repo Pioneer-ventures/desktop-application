@@ -6,6 +6,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authStore } from '@/store/authStore';
+import { UserRole } from '@/types';
 import './Navbar.css';
 
 interface NavItem {
@@ -19,6 +20,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard' },
   { label: 'Attendance', path: '/attendance' },
   { label: 'Reports', path: '/reports' },
+  { label: 'Reports', path: '/reports/admin', roles: ['admin'] },
+  { label: 'Settings', path: '/settings' },
 ];
 
 export const Navbar: React.FC = () => {
@@ -109,12 +112,25 @@ export const Navbar: React.FC = () => {
                (user.role === 'employee' && location.pathname === '/employee')
              ));
     }
+    // For Reports, admin should see active when on /reports/admin
+    if (path === '/reports') {
+      if (user?.role === UserRole.ADMIN) {
+        return location.pathname === '/reports/admin' || location.pathname.startsWith('/reports/admin');
+      }
+      return location.pathname === path || location.pathname.startsWith(path + '/');
+    }
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
 
   // Filter nav items based on role (future-ready)
   const visibleNavItems = NAV_ITEMS.filter((item) => {
     if (item.disabled) return false;
+    
+    // Hide "Reports" for admin (they have "Admin Reports" instead)
+    if (item.path === '/reports' && user?.role === UserRole.ADMIN) {
+      return false;
+    }
+    
     if (item.roles && user) {
       return item.roles.includes(user.role);
     }
@@ -179,6 +195,16 @@ export const Navbar: React.FC = () => {
 
             {userMenuOpen && (
               <div className="navbar-user-menu" role="menu">
+                <button
+                  className="navbar-menu-item"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    navigate('/settings');
+                  }}
+                  role="menuitem"
+                >
+                  Settings
+                </button>
                 <button
                   className="navbar-menu-item"
                   onClick={handleLogout}

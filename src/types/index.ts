@@ -15,6 +15,18 @@ export interface User {
   name: string;
   role: UserRole;
   department?: string;
+  phoneNumber?: string;
+  address?: string;
+  employeeId?: string;
+  designation?: string;
+  dateOfJoining?: string;
+  dateOfBirth?: string;
+  emergencyContact?: {
+    name?: string;
+    phone?: string;
+    relationship?: string;
+  };
+  bio?: string;
 }
 
 export interface LoginRequest {
@@ -80,10 +92,18 @@ export interface CheckInRequest {
     longitude?: number;
     address?: string;
   };
+  wifi?: {
+    ssid: string;
+    bssid?: string;
+  };
 }
 
 export interface CheckOutRequest {
   source: AttendanceSource;
+  wifi?: {
+    ssid: string;
+    bssid?: string;
+  };
 }
 
 export interface AttendanceDashboardData {
@@ -117,5 +137,30 @@ export interface AttendanceDashboardData {
     checkedOutCount: number;
     notStartedCount: number;
   };
+}
+
+// Reports Types
+export interface ReportAttachment {
+  fileName: string;
+  fileUrl: string;
+  filePublicId: string;
+  fileSize: number;
+  mimeType: string;
+}
+
+export interface WorkReport {
+  id: string;
+  employeeId: string;
+  title: string;
+  content: string;
+  attachments: ReportAttachment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateWorkReportRequest {
+  title: string;
+  content: string;
+  attachments: File[];
 }
 

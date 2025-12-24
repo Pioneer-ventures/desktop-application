@@ -4,12 +4,13 @@
 
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ProtectedRoute } from '@/components/ProtectedRoute/ProtectedRoute';
-import { AppLayout } from '@/components/Layout/AppLayout';
+import { ProtectedRoute, DashboardRedirect } from '@/shared/components/routing';
+import { AppLayout } from '@/shared/components/layout';
 import { LoginPage } from '@/pages/Login/LoginPage';
-import { DashboardRedirect } from '@/components/DashboardRedirect/DashboardRedirect';
 import { AttendancePage } from '@/pages/Attendance/AttendancePage';
 import { ReportsPage } from '@/pages/Reports/ReportsPage';
+import { AdminReportsPage } from '@/pages/Reports/AdminReportsPage';
+import { SettingsPage } from '@/pages/Settings/SettingsPage';
 import { AdminPage } from '@/pages/Admin/AdminPage';
 import { HRPage } from '@/pages/HR/HRPage';
 import { ManagerPage } from '@/pages/Manager/ManagerPage';
@@ -30,6 +31,15 @@ export const AppRouter: React.FC = () => {
             <Route path="/dashboard" element={<DashboardRedirect />} />
             <Route path="/attendance" element={<AttendancePage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route
+              path="/reports/admin"
+              element={
+                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                  <AdminReportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/settings" element={<SettingsPage />} />
 
             {/* Role-specific routes */}
             <Route
@@ -79,4 +89,3 @@ export const AppRouter: React.FC = () => {
     </HashRouter>
   );
 };
-

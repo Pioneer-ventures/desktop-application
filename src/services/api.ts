@@ -29,6 +29,10 @@ class ApiService {
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
+        // For FormData, don't set Content-Type - browser will set it with boundary
+        if (config.data instanceof FormData) {
+          delete config.headers['Content-Type'];
+        }
         return config;
       },
       (error) => {

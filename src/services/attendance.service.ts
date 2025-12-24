@@ -9,21 +9,57 @@ import {
   CheckInRequest,
   CheckOutRequest,
   AttendanceDashboardData,
+  AttendanceSource,
 } from '@/types';
+import { WifiInfo } from '@/types/electron';
 
 class AttendanceService {
   /**
    * Check-in
+   * For desktop source, automatically includes Wi-Fi information if available
    */
   async checkIn(request: CheckInRequest): Promise<AttendanceRecord> {
+    // For desktop source, try to get Wi-Fi info if not provided
+    if (request.source === AttendanceSource.DESKTOP && !request.wifi && window.electronAPI) {
+      try {
+        const wifiInfo: WifiInfo = await window.electronAPI.getCurrentWifi();
+        if (wifiInfo.ssid) {
+          request.wifi = {
+            ssid: wifiInfo.ssid,
+            bssid: wifiInfo.bssid || undefined,
+          };
+        }
+      } catch (error) {
+        console.error('Failed to get Wi-Fi info:', error);
+        // Continue without Wi-Fi info - backend will reject if required
+      }
+    }
+
     const response = await api.post('/attendance/check-in', request);
     return response.data.data;
   }
 
   /**
    * Check-out
+   * For desktop source, automatically includes Wi-Fi information if available
    */
   async checkOut(request: CheckOutRequest): Promise<AttendanceRecord> {
+    // For desktop source, try to get Wi-Fi info if not provided
+    if (request.source === AttendanceSource.DESKTOP && !request.wifi && window.electronAPI) {
+      try {
+        const wifiInfo: WifiInfo = await window.electronAPI.getCurrentWifi();
+        if (wifiInfo.ssid) {
+          request.wifi = {
+            ssid: wifiInfo.ssid,
+            bssid: wifiInfo.bssid || undefined,
+          };
+        }
+      } catch (error) {
+        console.error('Failed to get Wi-Fi info:', error);
+        // Continue without Wi-Fi info - backend will reject if required
+      }
+    }
+
     const response = await api.post('/attendance/check-out', request);
     return response.data.data;
   }

@@ -1,17 +1,27 @@
+/**
+ * Attendance Page Styles - Minimal, compact design
+ */
+
 .attendance-page {
-  padding: 0;
   max-width: 1400px;
   margin: 0 auto;
 }
 
 .attendance-page-header {
-  margin-bottom: var(--spacing-2xl);
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--color-border-light);
 }
 
 .attendance-page-header h1 {
-  font-size: 20px;
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: var(--font-size-large);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
-  margin: 0;
 }
 
+.page-subtitle {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+}

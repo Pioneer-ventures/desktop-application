@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { authStore } from '@/store/authStore';
-import { AttendanceDashboard } from '@/components/Attendance/AttendanceDashboard';
+import { AttendanceDashboard } from '@/features/attendance/components/AttendanceDashboard';
 import './AdminPage.css';
 
 export const AdminPage: React.FC = () => {

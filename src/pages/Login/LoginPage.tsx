@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { LoginForm } from '@/components/Auth/LoginForm';
+import { LoginForm } from '@/features/auth/components/LoginForm';
 
 export const LoginPage: React.FC = () => {
   return <LoginForm />;

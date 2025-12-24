@@ -1,7 +1,11 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 // Keep a global reference of the window object
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -297,6 +301,140 @@ app.whenReady().then(() => {
       mainWindow.focus();
     }
   });
+});
+
+// Wi-Fi detection functions
+interface WifiInfo {
+  ssid: string | null;
+  bssid: string | null;
+}
+
+/**
+ * Get current Wi-Fi information (SSID and optional BSSID)
+ * Cross-platform implementation
+ */
+async function getCurrentWifi(): Promise<WifiInfo> {
+  const platform = process.platform;
+  
+  try {
+    if (platform === 'win32') {
+      // Windows: Use netsh wlan show interfaces
+      try {
+        const { stdout } = await execAsync('netsh wlan show interfaces');
+        
+        // Split output into lines for easier parsing
+        const lines = stdout.split(/\r?\n/);
+        
+        let ssid: string | null = null;
+        let bssid: string | null = null;
+        
+        // Parse each line to find SSID and BSSID
+        for (const line of lines) {
+          // SSID format: "    SSID                   : Airtel_C3 wifi"
+          // Match SSID (with optional leading whitespace) followed by colon
+          // Exclude "Profile" line which also contains SSID value but is a different field
+          if (/^\s*SSID\s*:/.test(line) && !/Profile/.test(line)) {
+            const ssidPattern = /SSID\s*:\s*(.+)/i;
+            const ssidMatch = line.match(ssidPattern);
+            if (ssidMatch && ssidMatch[1]) {
+              const foundSsid = ssidMatch[1].trim();
+              // Skip if SSID is "none" or empty (not connected)
+              if (foundSsid && foundSsid.toLowerCase() !== 'none' && foundSsid.length > 0) {
+                ssid = foundSsid;
+              }
+            }
+          }
+          
+          // BSSID format: "    AP BSSID               : 14:33:75:6a:c2:16" (Windows uses "AP BSSID")
+          // Also try just "BSSID" as fallback for other formats
+          if (/BSSID\s*:/.test(line)) {
+            // Match "AP BSSID" or just "BSSID", capture the MAC address
+            const bssidPattern = /(?:AP\s+)?BSSID\s*:\s*([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})/i;
+            const bssidMatch = line.match(bssidPattern);
+            if (bssidMatch && bssidMatch[1]) {
+              // Normalize BSSID format (convert - to : and uppercase)
+              bssid = bssidMatch[1].replace(/-/g, ':').toUpperCase();
+            }
+          }
+        }
+        
+        return {
+          ssid,
+          bssid,
+        };
+      } catch (error: any) {
+        console.error('Windows Wi-Fi detection error:', error.message || error);
+        return { ssid: null, bssid: null };
+      }
+    } else if (platform === 'darwin') {
+      // macOS: Use airport command or networksetup
+      try {
+        // Try airport command first (requires full path)
+        const airportPath = '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport';
+        const { stdout } = await execAsync(`${airportPath} -I`);
+        const ssidMatch = stdout.match(/^\s*SSID:\s*(.+)$/m);
+        const bssidMatch = stdout.match(/^\s*BSSID:\s*([0-9a-f:]{17})/mi);
+        
+        return {
+          ssid: ssidMatch ? ssidMatch[1].trim() : null,
+          bssid: bssidMatch ? bssidMatch[1].trim().toUpperCase() : null,
+        };
+      } catch (error) {
+        // Fallback to networksetup (less detailed, no BSSID)
+        const { stdout } = await execAsync('networksetup -getairportnetwork en0');
+        const ssidMatch = stdout.match(/Current Wi-Fi Network:\s*(.+)/);
+        
+        return {
+          ssid: ssidMatch ? ssidMatch[1].trim() : null,
+          bssid: null, // networksetup doesn't provide BSSID
+        };
+      }
+    } else if (platform === 'linux') {
+      // Linux: Try iwgetid first, then nmcli
+      try {
+        // Try iwgetid (requires root for BSSID, but works for SSID)
+        const { stdout } = await execAsync('iwgetid -r');
+        const ssid = stdout.trim();
+        
+        // Try to get BSSID using iwgetid with more options
+        let bssid: string | null = null;
+        try {
+          const { stdout: bssidOutput } = await execAsync('iwgetid -ar');
+          const bssidMatch = bssidOutput.match(/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/);
+          bssid = bssidMatch ? bssidMatch[0].toUpperCase() : null;
+        } catch {
+          // BSSID not available without root
+        }
+        
+        return {
+          ssid: ssid || null,
+          bssid,
+        };
+      } catch (error) {
+        // Fallback to nmcli
+        try {
+          const { stdout } = await execAsync('nmcli -t -f active,ssid dev wifi | grep "^yes:" | head -1');
+          const ssidMatch = stdout.match(/yes:(.+)/);
+          return {
+            ssid: ssidMatch ? ssidMatch[1].trim() : null,
+            bssid: null, // nmcli requires more complex parsing for BSSID
+          };
+        } catch {
+          return { ssid: null, bssid: null };
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error getting Wi-Fi info:', error);
+    return { ssid: null, bssid: null };
+  }
+  
+  return { ssid: null, bssid: null };
+}
+
+// Register IPC handlers for Wi-Fi detection
+ipcMain.handle('get-current-wifi', async (): Promise<WifiInfo> => {
+  return getCurrentWifi();
 });
 
 // Keep app running in background - don't quit when windows are closed

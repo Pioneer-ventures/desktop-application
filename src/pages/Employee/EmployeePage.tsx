@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { authStore } from '@/store/authStore';
-import { EmployeeAttendance } from '@/components/Attendance/EmployeeAttendance';
+import { EmployeeAttendance } from '@/features/attendance/components/EmployeeAttendance';
 import './EmployeePage.css';
 
 export const EmployeePage: React.FC = () => {

@@ -1,0 +1,194 @@
+/**
+ * Employee Management Styles - Minimal, compact design
+ */
+
+.employee-management {
+  width: 100%;
+}
+
+.employee-management-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--color-border-light);
+}
+
+.employee-management-header h2 {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: var(--font-size-large);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.section-description {
+  margin: 0;
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+}
+
+.employee-management-loading {
+  text-align: center;
+  padding: var(--spacing-2xl);
+  color: var(--color-text-secondary);
+}
+
+.employee-form-card {
+  margin-bottom: var(--spacing-lg);
+}
+
+.employee-form-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--color-border-light);
+}
+
+.employee-form-header h3 {
+  margin: 0;
+  font-size: var(--font-size-large);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.employee-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-md);
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.input-group label {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.input-group .input {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--border-radius);
+  padding: var(--spacing-xs) var(--spacing-md);
+  min-height: 28px;
+  width: 100%;
+  transition: border-color var(--transition-fast);
+}
+
+.input-group .input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.input-group .input:disabled {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  cursor: not-allowed;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: var(--border-width) solid var(--color-border-light);
+}
+
+.employee-list-card {
+  margin-top: var(--spacing-lg);
+}
+
+.employee-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.employee-table thead {
+  background-color: var(--color-bg-tertiary);
+}
+
+.employee-table th {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+  text-align: left;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: var(--border-width) solid var(--color-border);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.employee-table td {
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: var(--border-width) solid var(--color-border-light);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+}
+
+.employee-table tbody tr:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.employee-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table-empty {
+  text-align: center;
+  color: var(--color-text-tertiary);
+  padding: var(--spacing-2xl) !important;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+  text-transform: capitalize;
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+.table-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-management-header {
+    flex-direction: column;
+    gap: var(--spacing-md);
+  }
+
+  .employee-table {
+    font-size: var(--font-size-small);
+  }
+
+  .employee-table th,
+  .employee-table td {
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+}
+
