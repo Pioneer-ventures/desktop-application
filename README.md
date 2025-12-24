@@ -74,3 +74,4 @@ The app uses JWT tokens for authentication. Tokens are stored securely using Zus
 The app uses path aliases (`@/`) for imports. Make sure your IDE is configured to recognize these aliases.
 
 # desktop-application
+# desktop-application
