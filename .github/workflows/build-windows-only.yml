@@ -1,0 +1,46 @@
+name: Build Windows Only
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      token:
+        description: 'GitHub Personal Access Token'
+        required: true
+        type: string
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./desktop-app
+
+      - name: Get version from package.json
+        id: get_version
+        run: |
+          $version = (Get-Content desktop-app/package.json | ConvertFrom-Json).version
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+        shell: pwsh
+
+      - name: Build application
+        run: npm run build
+        working-directory: ./desktop-app
+
+      - name: Build and Publish Windows
+        run: npm run publish:win
+        working-directory: ./desktop-app
+        env:
+          GH_TOKEN: ${{ github.event.inputs.token }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
