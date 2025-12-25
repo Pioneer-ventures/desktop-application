@@ -38,6 +38,7 @@ export interface LoginResponse {
   user: User;
   accessToken: string;
   refreshToken: string;
+  sessionId: string;
 }
 
 export interface AuthState {
@@ -48,6 +49,7 @@ export interface AuthState {
 }
 
 export interface RefreshTokenResponse {
+  sessionId?: string;
   accessToken: string;
   refreshToken: string;
 }
@@ -96,6 +98,7 @@ export interface CheckInRequest {
     ssid: string;
     bssid?: string;
   };
+  systemFingerprint?: string; // System/device fingerprint for one-employee-per-device enforcement
 }
 
 export interface CheckOutRequest {
@@ -104,6 +107,7 @@ export interface CheckOutRequest {
     ssid: string;
     bssid?: string;
   };
+  systemFingerprint?: string; // System/device fingerprint for one-employee-per-device enforcement
 }
 
 export interface AttendanceDashboardData {

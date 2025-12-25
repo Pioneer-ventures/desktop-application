@@ -49,6 +49,8 @@
   border-radius: 8px;
   margin-bottom: 16px;
   font-size: 14px;
+  line-height: 1.5;
+  border-left: 3px solid #dc2626;
 }
 
 .attendance-card {

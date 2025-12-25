@@ -106,7 +106,9 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
       setTodayRecord(statusData.today || null);
       setError(null);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load attendance status');
+      // Extract user-friendly error message from API response
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to load attendance status. Please refresh the page.';
+      setError(errorMessage);
     }
   };
 
@@ -208,7 +210,9 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
       setTodayRecord(record);
       await loadStatus();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to check in');
+      // Extract user-friendly error message from API response
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to check in. Please try again.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -250,7 +254,9 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
       setTodayRecord(record);
       await loadStatus();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to check out');
+      // Extract user-friendly error message from API response
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to check out. Please try again.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

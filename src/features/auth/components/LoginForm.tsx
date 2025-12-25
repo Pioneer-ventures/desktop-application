@@ -39,7 +39,7 @@ export const LoginForm: React.FC = () => {
 
     try {
       const response = await authService.login(formData);
-      login(response.user, response.accessToken, response.refreshToken);
+      login(response.user, response.accessToken, response.refreshToken, response.sessionId);
 
       const roleRoutes: Record<string, string> = {
         admin: '/admin',

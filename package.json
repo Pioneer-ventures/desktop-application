@@ -1,6 +1,6 @@
 {
   "name": "hrms-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "HRMS Desktop Application",
   "main": "dist-electron/main.js",
   "author": "HRMS Team",

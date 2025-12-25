@@ -40,15 +40,48 @@ class ApiService {
       }
     );
 
-    // Response interceptor - Handle errors
+    // Response interceptor - Handle errors and token refresh
     this.instance.interceptors.response.use(
       (response) => {
         return response;
       },
       async (error: AxiosError) => {
-        if (error.response?.status === 401) {
-          authStore.getState().logout();
+        const originalRequest = error.config as any;
+
+        // Handle 401 Unauthorized
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+
+          const { refreshToken } = authStore.getState();
+
+          if (refreshToken) {
+            try {
+              // Try to refresh token
+              const { authService } = await import('./auth.service');
+              const tokenData = await authService.refreshToken(refreshToken);
+
+              // Update store with new tokens
+              authStore.getState().login(
+                authStore.getState().user!,
+                tokenData.accessToken,
+                tokenData.refreshToken,
+                tokenData.sessionId
+              );
+
+              // Retry original request with new token
+              originalRequest.headers.Authorization = `Bearer ${tokenData.accessToken}`;
+              return this.instance(originalRequest);
+            } catch (refreshError) {
+              // Refresh failed, logout user
+              authStore.getState().logout();
+              return Promise.reject(refreshError);
+            }
+          } else {
+            // No refresh token, logout
+            authStore.getState().logout();
+          }
         }
+
         return Promise.reject(error);
       }
     );

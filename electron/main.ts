@@ -12,6 +12,31 @@ let tray: Tray | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+// Suppress Electron/Chromium cache errors on Windows
+// These are harmless permission warnings that can be safely ignored
+if (process.platform === 'win32') {
+  // Set a custom cache directory to avoid permission issues
+  const cachePath = path.join(app.getPath('userData'), 'Cache');
+  app.setPath('cache', cachePath);
+  
+  // Suppress console errors for cache issues (these are non-critical)
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    const message = args[0]?.toString() || '';
+    // Filter out cache-related errors
+    if (
+      message.includes('cache_util_win.cc') ||
+      message.includes('Unable to move the cache') ||
+      message.includes('Unable to create cache') ||
+      message.includes('Gpu Cache Creation failed')
+    ) {
+      // Silently ignore cache errors
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
+}
+
 // Get the logo path
 function getIconPath(): string | undefined {
   // Try multiple possible locations

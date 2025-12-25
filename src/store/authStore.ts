@@ -8,11 +8,13 @@ import { AuthState, User, UserRole } from '@/types';
 import { authService } from '@/services/auth.service';
 
 interface AuthStore extends AuthState {
-  login: (user: User, accessToken: string, refreshToken: string) => void;
+  login: (user: User, accessToken: string, refreshToken: string, sessionId?: string) => void;
   logout: () => void;
   setUser: (user: User) => void;
   hasRole: (role: UserRole) => boolean;
   hasAnyRole: (roles: UserRole[]) => boolean;
+  initializeAuth: () => Promise<void>;
+  isInitializing: boolean;
 }
 
 export const authStore = create<AuthStore>()(
@@ -22,14 +24,48 @@ export const authStore = create<AuthStore>()(
       accessToken: null,
       refreshToken: null,
       isAuthenticated: false,
+      isInitializing: true,
 
-      login: (user: User, accessToken: string, refreshToken: string) => {
+      login: (user: User, accessToken: string, refreshToken: string, sessionId?: string) => {
         set({
           user,
           accessToken,
           refreshToken,
           isAuthenticated: true,
+          isInitializing: false,
         });
+      },
+
+      initializeAuth: async () => {
+        set({ isInitializing: true });
+        const { refreshToken, user } = get();
+        
+        if (!refreshToken || !user) {
+          set({ isAuthenticated: false, isInitializing: false });
+          return;
+        }
+
+        try {
+          // Try to refresh token to validate session
+          const tokenData = await authService.refreshToken(refreshToken);
+          
+          set({
+            accessToken: tokenData.accessToken,
+            refreshToken: tokenData.refreshToken,
+            isAuthenticated: true,
+            isInitializing: false,
+          });
+        } catch (error) {
+          // Session invalid, clear auth state
+          console.log('[Auth] Session expired or invalid, clearing auth state');
+          set({
+            user: null,
+            accessToken: null,
+            refreshToken: null,
+            isAuthenticated: false,
+            isInitializing: false,
+          });
+        }
       },
 
       logout: async () => {
@@ -80,6 +116,7 @@ export const authStore = create<AuthStore>()(
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
+        // Don't persist isInitializing
       }),
     }
   )
