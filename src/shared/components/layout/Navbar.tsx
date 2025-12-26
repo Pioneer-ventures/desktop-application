@@ -20,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Attendance', path: '/attendance' },
   { label: 'Reports', path: '/reports' },
   { label: 'Reports', path: '/reports/admin', roles: ['admin'] },
+  { label: 'Calendar', path: '/calendar' },
   { label: 'Settings', path: '/settings' },
 ];
 
@@ -103,6 +104,9 @@ export const Navbar: React.FC = () => {
       if (user?.role === UserRole.ADMIN) {
         return location.pathname === '/reports/admin' || location.pathname.startsWith('/reports/admin');
       }
+      return location.pathname === path || location.pathname.startsWith(path + '/');
+    }
+    if (path === '/calendar') {
       return location.pathname === path || location.pathname.startsWith(path + '/');
     }
     return location.pathname === path || location.pathname.startsWith(path + '/');

@@ -6,8 +6,10 @@ import { api } from './api';
 
 export interface WifiNetwork {
   id: string;
-  ssid: string;
-  bssid?: string;
+  connectionType: 'wifi' | 'ethernet';
+  ssid?: string; // For WiFi only
+  bssid?: string; // For WiFi only
+  macAddress?: string; // For Ethernet only
   location?: string;
   isActive: boolean;
   createdBy: string;
@@ -16,8 +18,9 @@ export interface WifiNetwork {
 }
 
 export interface WifiValidationRequest {
-  ssid: string;
-  bssid?: string;
+  ssid?: string; // For WiFi
+  bssid?: string; // For WiFi
+  macAddress?: string; // For Ethernet
 }
 
 export interface WifiValidationResponse {
@@ -27,25 +30,36 @@ export interface WifiValidationResponse {
 }
 
 export interface CreateWifiNetworkRequest {
-  ssid: string;
-  bssid?: string;
+  connectionType?: 'wifi' | 'ethernet';
+  ssid?: string; // Required for WiFi
+  bssid?: string; // Optional for WiFi
+  macAddress?: string; // Required for Ethernet
   location?: string;
 }
 
 export interface UpdateWifiNetworkRequest {
+  connectionType?: 'wifi' | 'ethernet';
   ssid?: string;
   bssid?: string;
+  macAddress?: string;
   location?: string;
   isActive?: boolean;
 }
 
 class WifiService {
   /**
-   * Validate Wi-Fi network for attendance
+   * Validate network for attendance (WiFi or Ethernet)
    */
-  async validateWifi(request: WifiValidationRequest): Promise<WifiValidationResponse> {
+  async validateNetwork(request: WifiValidationRequest): Promise<WifiValidationResponse> {
     const response = await api.post('/wifi/validate', request);
     return response.data.data;
+  }
+
+  /**
+   * Validate Wi-Fi network for attendance (deprecated, use validateNetwork)
+   */
+  async validateWifi(request: WifiValidationRequest): Promise<WifiValidationResponse> {
+    return this.validateNetwork(request);
   }
 
   /**

@@ -34,8 +34,8 @@ export const WifiNetworkList: React.FC<WifiNetworkListProps> = ({
   if (networks.length === 0) {
     return (
       <div className="wifi-network-list-empty">
-        <p>No Wi-Fi networks configured yet.</p>
-        <p className="empty-subtitle">Click "Add Network" to add your first approved Wi-Fi network.</p>
+        <p>No networks configured yet.</p>
+        <p className="empty-subtitle">Click "Add Network" to add your first approved network (WiFi or Ethernet).</p>
       </div>
     );
   }
@@ -46,8 +46,9 @@ export const WifiNetworkList: React.FC<WifiNetworkListProps> = ({
         <table className="wifi-network-table">
           <thead>
             <tr>
-              <th>SSID</th>
-              <th>BSSID</th>
+              <th>Type</th>
+              <th>SSID/Name</th>
+              <th>BSSID/MAC Address</th>
               <th>Location</th>
               <th>Status</th>
               <th>Created</th>
@@ -57,16 +58,34 @@ export const WifiNetworkList: React.FC<WifiNetworkListProps> = ({
           <tbody>
             {networks.map((network) => (
               <tr key={network.id} className={!network.isActive ? 'inactive' : ''}>
+                <td className="type-cell">
+                  <span className={`type-badge ${network.connectionType}`}>
+                    {network.connectionType === 'wifi' ? 'WiFi' : 'Ethernet'}
+                  </span>
+                </td>
                 <td className="ssid-cell">
                   <div className="ssid-content">
-                    <span className="ssid-name">{network.ssid}</span>
+                    <span className="ssid-name">
+                      {network.connectionType === 'wifi' 
+                        ? network.ssid || '—'
+                        : network.ssid || 'Ethernet'
+                      }
+                    </span>
                   </div>
                 </td>
                 <td className="bssid-cell">
-                  {network.bssid ? (
-                    <code className="bssid-code">{network.bssid}</code>
+                  {network.connectionType === 'wifi' ? (
+                    network.bssid ? (
+                      <code className="bssid-code">{network.bssid}</code>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )
                   ) : (
-                    <span className="text-muted">—</span>
+                    network.macAddress ? (
+                      <code className="bssid-code">{network.macAddress}</code>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )
                   )}
                 </td>
                 <td className="location-cell">

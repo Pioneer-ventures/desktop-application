@@ -3,20 +3,41 @@
  * Organized by sections with role-based access
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { authStore } from '@/store/authStore';
 import { UserRole } from '@/types';
 import { PersonalSettings } from './sections/PersonalSettings';
 import { AttendanceSettings } from './sections/AttendanceSettings';
 import { ReportsSettings } from './sections/ReportsSettings';
 import { EmployeeSettings } from './sections/EmployeeSettings';
+import { ShiftSettings } from './sections/ShiftSettings';
+import { SystemLogs } from './sections/SystemLogs';
 import './SettingsPage.css';
 
-type SettingsSection = 'personal' | 'attendance' | 'reports' | 'employees';
+type SettingsSection = 'personal' | 'attendance' | 'reports' | 'employees' | 'shifts' | 'logs';
 
 export const SettingsPage: React.FC = () => {
   const { user } = authStore();
   const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
+
+  useEffect(() => {
+    // Listen for open-logs-viewer event from tray menu
+    const handleOpenLogsViewer = () => {
+      setActiveSection('logs');
+    };
+
+    window.addEventListener('open-logs-viewer', handleOpenLogsViewer);
+
+    // Check URL hash for direct navigation
+    const hash = window.location.hash.replace('#', '');
+    if (hash === 'logs') {
+      setActiveSection('logs');
+    }
+
+    return () => {
+      window.removeEventListener('open-logs-viewer', handleOpenLogsViewer);
+    };
+  }, []);
 
   const canManageEmployees = user?.role === UserRole.HR || user?.role === UserRole.ADMIN;
 
@@ -25,6 +46,8 @@ export const SettingsPage: React.FC = () => {
     { id: 'attendance' as const, label: 'Attendance', icon: '📅' },
     { id: 'reports' as const, label: 'Reports', icon: '📊' },
     ...(canManageEmployees ? [{ id: 'employees' as const, label: 'Employees', icon: '👥' }] : []),
+    ...(canManageEmployees ? [{ id: 'shifts' as const, label: 'Shifts', icon: '🕐' }] : []),
+    { id: 'logs' as const, label: 'System Logs', icon: '📋' },
   ];
 
   return (
@@ -55,6 +78,8 @@ export const SettingsPage: React.FC = () => {
           {activeSection === 'attendance' && <AttendanceSettings />}
           {activeSection === 'reports' && <ReportsSettings />}
           {activeSection === 'employees' && canManageEmployees && <EmployeeSettings />}
+          {activeSection === 'shifts' && canManageEmployees && <ShiftSettings />}
+          {activeSection === 'logs' && <SystemLogs />}
         </div>
       </div>
     </div>

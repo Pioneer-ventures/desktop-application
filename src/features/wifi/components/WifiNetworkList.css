@@ -124,6 +124,30 @@
   color: #991b1b;
 }
 
+.type-cell {
+  white-space: nowrap;
+}
+
+.type-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.type-badge.wifi {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.type-badge.ethernet {
+  background-color: #e0e7ff;
+  color: #3730a3;
+}
+
 .date-cell {
   white-space: nowrap;
   color: var(--color-text-secondary);

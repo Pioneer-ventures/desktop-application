@@ -176,6 +176,31 @@ function createTray(): void {
       },
     },
     {
+      type: 'separator',
+    },
+    {
+      label: 'View System Logs',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          // Send IPC message to open logs viewer
+          mainWindow.webContents.send('open-logs-viewer');
+        } else {
+          createWindow();
+          // Wait for window to load, then send message
+          setTimeout(() => {
+            if (mainWindow) {
+              mainWindow.webContents.send('open-logs-viewer');
+            }
+          }, 1000);
+        }
+      },
+    },
+    {
+      type: 'separator',
+    },
+    {
       label: 'Quit',
       click: () => {
         appIsQuitting = true;
@@ -328,10 +353,241 @@ app.whenReady().then(() => {
   });
 });
 
-// Wi-Fi detection functions
-interface WifiInfo {
-  ssid: string | null;
-  bssid: string | null;
+// Network detection functions
+interface NetworkInfo {
+  type: 'wifi' | 'ethernet' | 'none';
+  wifi?: {
+    ssid: string;
+    bssid: string | null;
+  };
+  ethernet?: {
+    macAddress: string;
+    adapterName?: string;
+  };
+}
+
+/**
+ * Get MAC address of Ethernet adapter
+ * Cross-platform implementation
+ */
+async function getEthernetMacAddress(): Promise<{ macAddress: string | null; adapterName?: string }> {
+  const platform = process.platform;
+  console.log(`[DEBUG] getEthernetMacAddress() called on platform: ${platform}`);
+  
+  try {
+    if (platform === 'win32') {
+      console.log('[DEBUG] Windows detected, starting Ethernet detection...');
+      // Windows: Use getmac command and ipconfig to find active Ethernet adapters
+      try {
+        // Method 1: Use ipconfig /all to find active adapters with IP addresses (most reliable)
+        console.log('[DEBUG] Running ipconfig /all...');
+        const { stdout: ipconfigOutput } = await execAsync('ipconfig /all');
+        console.log(`[DEBUG] ipconfig output length: ${ipconfigOutput.length} characters`);
+        const ipconfigLines = ipconfigOutput.split(/\r?\n/);
+        console.log(`[DEBUG] ipconfig lines: ${ipconfigLines.length}`);
+        
+        let currentAdapter = '';
+        let currentMac = '';
+        let hasIpAddress = false;
+        const activeAdapters: Array<{ name: string; mac: string }> = [];
+        
+        for (let i = 0; i < ipconfigLines.length; i++) {
+          const line = ipconfigLines[i].trim();
+          
+          // Check for adapter name (ends with : and doesn't start with space, not an IP line)
+          if (line && line.endsWith(':') && !line.startsWith(' ') && !line.match(/^\d+\./)) {
+            // Save previous adapter if it had MAC (even without IP, as USB adapters might show "Media disconnected" but still work)
+            if (currentAdapter && currentMac) {
+              // Only check if it's not WiFi
+              if (!/wireless|wlan|wi-fi|802\.11|wifi|qualcomm.*wireless|qca.*wireless/i.test(currentAdapter)) {
+                // Skip loopback/virtual but keep USB Ethernet and all Ethernet adapters
+                if (!/loopback|tunneling|isatap|teredo|6to4|vmware.*adapter|virtualbox.*adapter|hyper-v.*virtual|microsoft.*wifi.*direct|bluetooth/i.test(currentAdapter)) {
+                  // Prefer adapters with IP, but also include those without (for USB Ethernet that might show "Media disconnected")
+                  if (hasIpAddress) {
+                    activeAdapters.unshift({ name: currentAdapter, mac: currentMac }); // Put at front
+                  } else {
+                    activeAdapters.push({ name: currentAdapter, mac: currentMac }); // Put at back
+                  }
+                }
+              }
+            }
+            // Reset for new adapter
+            currentAdapter = line.replace(/:$/, '').trim();
+            currentMac = '';
+            hasIpAddress = false;
+          }
+          
+          // Look for Physical Address
+          if (line.includes('Physical Address') || line.includes('Physical address')) {
+            const macMatch = line.match(/([0-9A-F]{2}[:-]){5}([0-9A-F]{2})/i);
+            if (macMatch && currentAdapter) {
+              currentMac = macMatch[0].replace(/-/g, ':').toUpperCase();
+              console.log(`[DEBUG] Found MAC ${currentMac} for adapter: ${currentAdapter}`);
+            }
+          }
+          
+          // Check for IPv4 Address (indicates active connection)
+          // Match IPv4 Address lines, but exclude Autoconfiguration ones
+          if (line.includes('IPv4 Address') && !line.includes('Autoconfiguration')) {
+            // Extract IP address, handling (Preferred) suffix
+            const ipMatch = line.match(/IPv4 Address[^:]*:\s*(\d+\.\d+\.\d+\.\d+)(?:\(Preferred\))?/i);
+            if (ipMatch && ipMatch[1] !== '0.0.0.0') {
+              hasIpAddress = true;
+              console.log(`[DEBUG] Adapter ${currentAdapter} has IP address: ${ipMatch[1]}`);
+            }
+          }
+        }
+        
+        // Save last adapter if it had MAC
+        if (currentAdapter && currentMac) {
+          if (!/wireless|wlan|wi-fi|802\.11|wifi|qualcomm.*wireless|qca.*wireless/i.test(currentAdapter)) {
+            if (!/loopback|tunneling|isatap|teredo|6to4|vmware.*adapter|virtualbox.*adapter|hyper-v.*virtual|microsoft.*wifi.*direct|bluetooth/i.test(currentAdapter)) {
+              if (hasIpAddress) {
+                activeAdapters.unshift({ name: currentAdapter, mac: currentMac });
+              } else {
+                activeAdapters.push({ name: currentAdapter, mac: currentMac });
+              }
+            }
+          }
+        }
+        
+        // Return first adapter (prioritizes those with IP addresses)
+        console.log(`[DEBUG] Found ${activeAdapters.length} Ethernet adapter(s):`, activeAdapters.map(a => `${a.name} (${a.mac})`).join(', '));
+        if (activeAdapters.length > 0) {
+          const adapter = activeAdapters[0];
+          console.log(`[DEBUG] ✓ Selected Ethernet adapter: ${adapter.name} (${adapter.mac})`);
+          return { macAddress: adapter.mac, adapterName: adapter.name };
+        }
+        
+        // Fallback: Try getmac as backup (for adapters not showing in ipconfig)
+        console.log('[DEBUG] ipconfig found no adapters, trying getmac fallback...');
+        try {
+          const { stdout: getmacOutput } = await execAsync('getmac /fo csv /nh /v');
+          console.log(`[DEBUG] getmac output:\n${getmacOutput}`);
+          const getmacLines = getmacOutput.trim().split(/\r?\n/).filter(line => line.trim());
+          console.log(`[DEBUG] getmac lines: ${getmacLines.length}`);
+          
+          for (const line of getmacLines) {
+            // Format: "Connection Name","Network Adapter","Physical Address","Transport Name"
+            const csvMatch = line.match(/^"([^"]*)","([^"]*)","([0-9A-F-]{17})"/i);
+            if (csvMatch) {
+              const connectionName = csvMatch[1];
+              const adapterName = csvMatch[2];
+              const macAddress = csvMatch[3];
+              
+              console.log(`[DEBUG] Processing getmac line: ${connectionName} / ${adapterName} / ${macAddress}`);
+              
+              // Skip WiFi adapters
+              if (/wireless|wlan|wi-fi|802\.11|wifi/i.test(connectionName) || /wireless|wlan|wi-fi|802\.11|wifi/i.test(adapterName)) {
+                console.log(`[DEBUG] Skipping WiFi adapter: ${adapterName}`);
+                continue;
+              }
+              
+              // Skip Bluetooth and virtual adapters (but keep USB Ethernet)
+              if (/bluetooth|microsoft.*wifi.*direct/i.test(adapterName)) {
+                console.log(`[DEBUG] Skipping Bluetooth/virtual adapter: ${adapterName}`);
+                continue;
+              }
+              
+              // Keep Ethernet adapters (including USB)
+              if (/ethernet/i.test(connectionName) || /ethernet|usb.*gb/i.test(adapterName)) {
+                const mac = macAddress.replace(/-/g, ':').toUpperCase();
+                console.log(`[DEBUG] ✓ Found Ethernet adapter via getmac: ${adapterName} (${mac})`);
+                return { macAddress: mac, adapterName: adapterName };
+              } else {
+                console.log(`[DEBUG] Skipping adapter (not Ethernet): ${connectionName} / ${adapterName}`);
+              }
+            }
+          }
+        } catch (getmacError: any) {
+          console.log('[DEBUG] getmac fallback failed:', getmacError.message);
+        }
+        
+        console.log('[DEBUG] ✗ No Ethernet adapter found after checking ipconfig and getmac');
+        return { macAddress: null };
+      } catch (error: any) {
+        console.error('[DEBUG] ✗ Windows Ethernet MAC detection error:', error.message || error);
+        console.error('[DEBUG] Error stack:', error.stack);
+        return { macAddress: null };
+      }
+    } else if (platform === 'darwin') {
+      // macOS: Use ifconfig or networksetup
+      try {
+        // Get list of Ethernet adapters (en0, en1, etc., excluding en0 if it's WiFi)
+        const { stdout: networksetup } = await execAsync('networksetup -listallhardwareports');
+        const lines = networksetup.split(/\r?\n/);
+        
+        let currentPort = '';
+        let currentDevice = '';
+        
+        for (const line of lines) {
+          if (line.includes('Hardware Port:')) {
+            currentPort = line.split(':')[1].trim();
+          }
+          if (line.includes('Device:')) {
+            currentDevice = line.split(':')[1].trim();
+            
+            // Skip WiFi ports
+            if (/Wi-Fi|AirPort/i.test(currentPort)) {
+              continue;
+            }
+            
+            // Get MAC address for this device
+            if (currentDevice && currentDevice.startsWith('en')) {
+              try {
+                const { stdout: ifconfig } = await execAsync(`ifconfig ${currentDevice}`);
+                const macMatch = ifconfig.match(/ether\s+([0-9a-f:]{17})/i);
+                if (macMatch) {
+                  return { macAddress: macMatch[1].toUpperCase(), adapterName: currentPort };
+                }
+              } catch {
+                // Continue to next device
+              }
+            }
+          }
+        }
+      } catch (error: any) {
+        console.error('macOS Ethernet MAC detection error:', error.message || error);
+        return { macAddress: null };
+      }
+    } else if (platform === 'linux') {
+      // Linux: Use ip link or ifconfig
+      try {
+        const { stdout } = await execAsync('ip link show');
+        const lines = stdout.split(/\r?\n/);
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          
+          // Skip WiFi interfaces (wlan, wlp, etc.)
+          if (/^\d+:\s+(wlan|wlp|wl-)/i.test(line)) {
+            continue;
+          }
+          
+          // Look for Ethernet interfaces (eth, enp, eno, etc.)
+          if (/^\d+:\s+(eth|enp|eno|ens|em)/i.test(line)) {
+            const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
+            const macMatch = nextLine.match(/link\/ether\s+([0-9a-f:]{17})/i);
+            if (macMatch) {
+              const adapterMatch = line.match(/^\d+:\s+([^:]+):/);
+              return { 
+                macAddress: macMatch[1].toUpperCase(), 
+                adapterName: adapterMatch ? adapterMatch[1].trim() : undefined 
+              };
+            }
+          }
+        }
+      } catch (error: any) {
+        console.error('Linux Ethernet MAC detection error:', error.message || error);
+        return { macAddress: null };
+      }
+    }
+  } catch (error) {
+    console.error('Error getting Ethernet MAC address:', error);
+    return { macAddress: null };
+  }
+  
+  return { macAddress: null };
 }
 
 /**
@@ -457,9 +713,87 @@ async function getCurrentWifi(): Promise<WifiInfo> {
   return { ssid: null, bssid: null };
 }
 
-// Register IPC handlers for Wi-Fi detection
+/**
+ * Get current network information (WiFi or Ethernet)
+ * Returns WiFi info if connected via WiFi, Ethernet MAC if connected via Ethernet
+ */
+async function getCurrentNetwork(): Promise<NetworkInfo> {
+  console.log('[DEBUG] getCurrentNetwork() called');
+  try {
+    // First, try to get WiFi info
+    console.log('[DEBUG] Step 1: Checking WiFi...');
+    const wifiInfo = await getCurrentWifi();
+    console.log('[DEBUG] WiFi check result:', JSON.stringify(wifiInfo, null, 2));
+    
+    // If WiFi connection found, return WiFi info
+    if (wifiInfo.ssid && wifiInfo.ssid.trim() !== '') {
+      console.log(`[DEBUG] ✓ WiFi detected: ${wifiInfo.ssid}`);
+      return {
+        type: 'wifi',
+        wifi: {
+          ssid: wifiInfo.ssid,
+          bssid: wifiInfo.bssid || null,
+        },
+      };
+    }
+    
+    // No WiFi, try Ethernet
+    console.log('[DEBUG] Step 2: No WiFi found, checking for Ethernet...');
+    const ethernetInfo = await getEthernetMacAddress();
+    console.log('[DEBUG] Ethernet check result:', JSON.stringify(ethernetInfo, null, 2));
+    
+    if (ethernetInfo.macAddress) {
+      console.log(`[DEBUG] ✓ Ethernet detected: ${ethernetInfo.macAddress} (${ethernetInfo.adapterName || 'Unknown adapter'})`);
+      return {
+        type: 'ethernet',
+        ethernet: {
+          macAddress: ethernetInfo.macAddress,
+          adapterName: ethernetInfo.adapterName,
+        },
+      };
+    }
+    
+    // No network connection found
+    console.log('[DEBUG] ✗ No network connection found (WiFi: none, Ethernet: none)');
+    return {
+      type: 'none',
+    };
+  } catch (error: any) {
+    console.error('[DEBUG] ✗ Error in getCurrentNetwork():', error);
+    console.error('[DEBUG] Error stack:', error?.stack);
+    return {
+      type: 'none',
+    };
+  }
+}
+
+// Register IPC handlers for network detection
+interface WifiInfo {
+  ssid: string | null;
+  bssid: string | null;
+}
+
 ipcMain.handle('get-current-wifi', async (): Promise<WifiInfo> => {
   return getCurrentWifi();
+});
+
+ipcMain.handle('get-current-network', async (): Promise<NetworkInfo> => {
+  return getCurrentNetwork();
+});
+
+// Handle opening logs viewer
+ipcMain.handle('open-logs-viewer', async () => {
+  if (mainWindow) {
+    mainWindow.webContents.send('open-logs-viewer');
+    return true;
+  }
+  return false;
+});
+
+// Handle getting log file path
+ipcMain.handle('get-log-path', async () => {
+  const logPath = path.join(app.getPath('logs'), 'main.log');
+  return logPath;
 });
 
 // Keep app running in background - don't quit when windows are closed

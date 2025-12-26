@@ -3,7 +3,7 @@
  */
 
 import { api } from './api';
-import { User, UserRole } from '@/types';
+import { User, UserRole, EmployeeDetails, UpdateEmployeeDetailsRequest } from '@/types';
 
 export interface CreateEmployeeRequest {
   email: string;
@@ -94,4 +94,30 @@ class EmployeeService {
 }
 
 export const employeeService = new EmployeeService();
+
+/**
+ * Employee Details Service - API calls for comprehensive employee profile management
+ */
+class EmployeeDetailsService {
+  /**
+   * Get comprehensive employee details
+   */
+  async getEmployeeDetails(employeeId: string): Promise<EmployeeDetails> {
+    const response = await api.get(`/employees/${employeeId}/details`);
+    return response.data.data;
+  }
+
+  /**
+   * Update employee details (partial update)
+   */
+  async updateEmployeeDetails(
+    employeeId: string,
+    request: UpdateEmployeeDetailsRequest
+  ): Promise<EmployeeDetails> {
+    const response = await api.patch(`/employees/${employeeId}/details`, request);
+    return response.data.data;
+  }
+}
+
+export const employeeDetailsService = new EmployeeDetailsService();
 

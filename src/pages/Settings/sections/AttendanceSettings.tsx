@@ -101,7 +101,10 @@ export const AttendanceSettings: React.FC = () => {
   };
 
   const handleDeleteNetwork = async (network: WifiNetwork) => {
-    if (!window.confirm(`Are you sure you want to delete the Wi-Fi network "${network.ssid}"? This action cannot be undone.`)) {
+    const networkName = network.connectionType === 'wifi' 
+      ? network.ssid || 'WiFi network'
+      : network.macAddress || 'Ethernet network';
+    if (!window.confirm(`Are you sure you want to delete the ${network.connectionType === 'wifi' ? 'WiFi' : 'Ethernet'} network "${networkName}"? This action cannot be undone.`)) {
       return;
     }
 

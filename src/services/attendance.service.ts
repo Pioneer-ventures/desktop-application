@@ -11,28 +11,32 @@ import {
   AttendanceDashboardData,
   AttendanceSource,
 } from '@/types';
-import { WifiInfo } from '@/types/electron';
+import { NetworkInfo } from '@/types/electron';
 import { getSystemFingerprint } from '@/utils/systemFingerprint';
 
 class AttendanceService {
   /**
    * Check-in
-   * For desktop source, automatically includes Wi-Fi information and system fingerprint (REQUIRED)
+   * For desktop source, automatically includes network information (WiFi or Ethernet) and system fingerprint (REQUIRED)
    */
   async checkIn(request: CheckInRequest): Promise<AttendanceRecord> {
-    // For desktop source, try to get Wi-Fi info if not provided
-    if (request.source === AttendanceSource.DESKTOP && !request.wifi && window.electronAPI) {
+    // For desktop source, try to get network info (WiFi or Ethernet) if not provided
+    if (request.source === AttendanceSource.DESKTOP && !request.wifi && !request.ethernet && window.electronAPI) {
       try {
-        const wifiInfo: WifiInfo = await window.electronAPI.getCurrentWifi();
-        if (wifiInfo.ssid) {
+        const networkInfo = await window.electronAPI.getCurrentNetwork();
+        if (networkInfo.type === 'wifi' && networkInfo.wifi?.ssid) {
           request.wifi = {
-            ssid: wifiInfo.ssid,
-            bssid: wifiInfo.bssid || undefined,
+            ssid: networkInfo.wifi.ssid,
+            bssid: networkInfo.wifi.bssid || undefined,
+          };
+        } else if (networkInfo.type === 'ethernet' && networkInfo.ethernet?.macAddress) {
+          request.ethernet = {
+            macAddress: networkInfo.ethernet.macAddress,
           };
         }
       } catch (error) {
-        console.error('Failed to get Wi-Fi info:', error);
-        // Continue without Wi-Fi info - backend will reject if required
+        console.error('Failed to get network info:', error);
+        // Continue without network info - backend will reject if required
       }
     }
 
@@ -70,19 +74,23 @@ class AttendanceService {
    * For desktop source, automatically includes Wi-Fi information and system fingerprint (REQUIRED)
    */
   async checkOut(request: CheckOutRequest): Promise<AttendanceRecord> {
-    // For desktop source, try to get Wi-Fi info if not provided
-    if (request.source === AttendanceSource.DESKTOP && !request.wifi && window.electronAPI) {
+    // For desktop source, try to get network info (WiFi or Ethernet) if not provided
+    if (request.source === AttendanceSource.DESKTOP && !request.wifi && !request.ethernet && window.electronAPI) {
       try {
-        const wifiInfo: WifiInfo = await window.electronAPI.getCurrentWifi();
-        if (wifiInfo.ssid) {
+        const networkInfo = await window.electronAPI.getCurrentNetwork();
+        if (networkInfo.type === 'wifi' && networkInfo.wifi?.ssid) {
           request.wifi = {
-            ssid: wifiInfo.ssid,
-            bssid: wifiInfo.bssid || undefined,
+            ssid: networkInfo.wifi.ssid,
+            bssid: networkInfo.wifi.bssid || undefined,
+          };
+        } else if (networkInfo.type === 'ethernet' && networkInfo.ethernet?.macAddress) {
+          request.ethernet = {
+            macAddress: networkInfo.ethernet.macAddress,
           };
         }
       } catch (error) {
-        console.error('Failed to get Wi-Fi info:', error);
-        // Continue without Wi-Fi info - backend will reject if required
+        console.error('Failed to get network info:', error);
+        // Continue without network info - backend will reject if required
       }
     }
 

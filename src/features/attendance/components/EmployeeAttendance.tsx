@@ -13,12 +13,12 @@ import {
   AttendanceStatusResponse,
   AttendanceRecord,
 } from '@/types';
-import { WifiInfo } from '@/types/electron';
+import { NetworkInfo } from '@/types/electron';
 import './EmployeeAttendance.css';
 
-interface WifiValidationState {
+interface NetworkValidationState {
   isValid: boolean | null; // null = checking, true = valid, false = invalid
-  currentWifi: WifiInfo | null;
+  networkInfo: NetworkInfo | null;
   reason?: string;
   loading: boolean;
 }
@@ -28,9 +28,9 @@ export const EmployeeAttendance: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null);
-  const [wifiValidation, setWifiValidation] = useState<WifiValidationState>({
+  const [networkValidation, setNetworkValidation] = useState<NetworkValidationState>({
     isValid: null,
-    currentWifi: null,
+    networkInfo: null,
     loading: false,
   });
   const isCheckingWifi = React.useRef(false);
@@ -38,7 +38,7 @@ export const EmployeeAttendance: React.FC = () => {
   // Load initial status
   useEffect(() => {
     loadStatus();
-    checkWifiStatus();
+    checkNetworkStatus();
     
     // Connect to Socket.IO
     socketService.connect();
@@ -53,74 +53,123 @@ export const EmployeeAttendance: React.FC = () => {
     };
   }, []);
 
-  // Check Wi-Fi status when window gains focus (user switches back to app)
+  // Check network status when window gains focus (user switches back to app)
   useEffect(() => {
     if (!window.electronAPI) return;
 
     const handleFocus = () => {
-      // Check Wi-Fi when user switches back to the app (may have changed networks)
-      checkWifiStatus();
+      // Check network when user switches back to the app (may have changed networks)
+      checkNetworkStatus();
     };
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
-  // Check Wi-Fi status periodically (every 20 seconds) if on desktop
+  // Check network status periodically (every 20 seconds) if on desktop
   useEffect(() => {
     if (!window.electronAPI) return;
 
     const interval = setInterval(() => {
-      checkWifiStatus();
+      checkNetworkStatus();
     }, 20000); // Check every 20 seconds
 
     return () => clearInterval(interval);
   }, []);
 
-  const checkWifiStatus = async () => {
+  const checkNetworkStatus = async () => {
+    console.log('[Frontend DEBUG] checkNetworkStatus() called');
     // Prevent duplicate simultaneous checks
-    if (isCheckingWifi.current || !window.electronAPI) return;
+    if (isCheckingWifi.current || !window.electronAPI) {
+      if (!window.electronAPI) {
+        console.log('[Frontend DEBUG] No electronAPI available, skipping network check');
+      } else {
+        console.log('[Frontend DEBUG] Network check already in progress, skipping');
+      }
+      return;
+    }
+
+    console.log('[Frontend DEBUG] Starting network check...');
+    isCheckingWifi.current = true;
+    setNetworkValidation((prev) => ({ ...prev, loading: true }));
 
     try {
-      isCheckingWifi.current = true;
-      setWifiValidation((prev) => ({ ...prev, loading: true }));
+      // Get current network info from Electron (WiFi or Ethernet)
+      console.log('[Frontend DEBUG] Calling window.electronAPI.getCurrentNetwork()...');
+      const networkInfo: NetworkInfo = await window.electronAPI.getCurrentNetwork();
+      console.log('[Frontend DEBUG] getCurrentNetwork() returned:', JSON.stringify(networkInfo, null, 2));
 
-      // Get current Wi-Fi info from Electron
-      const wifiInfo: WifiInfo = await window.electronAPI.getCurrentWifi();
-
-      if (!wifiInfo.ssid) {
-        setWifiValidation({
+      if (networkInfo.type === 'none') {
+        console.log('[Frontend DEBUG] Network type is "none", showing error');
+        setNetworkValidation({
           isValid: false,
-          currentWifi: null,
-          reason: 'No Wi-Fi network connected',
+          networkInfo: null,
+          reason: 'No network connection detected. Please connect to a WiFi or Ethernet network.',
           loading: false,
         });
         isCheckingWifi.current = false;
         return;
       }
 
-      // Validate Wi-Fi with backend
-      const validation = await wifiService.validateWifi({
-        ssid: wifiInfo.ssid,
-        bssid: wifiInfo.bssid || undefined,
-      });
+      console.log(`[Frontend DEBUG] Network type: ${networkInfo.type}`);
+      if (networkInfo.type === 'wifi') {
+        console.log(`[Frontend DEBUG] WiFi info:`, networkInfo.wifi);
+      } else if (networkInfo.type === 'ethernet') {
+        console.log(`[Frontend DEBUG] Ethernet info:`, networkInfo.ethernet);
+      }
 
-      setWifiValidation({
+      // Validate network with backend (WiFi or Ethernet)
+      console.log('[Frontend DEBUG] Validating network with backend...');
+      let validation;
+      if (networkInfo.type === 'wifi' && networkInfo.wifi) {
+        const validationRequest = {
+          ssid: networkInfo.wifi.ssid,
+          bssid: networkInfo.wifi.bssid || undefined,
+        };
+        console.log('[Frontend DEBUG] WiFi validation request:', validationRequest);
+        validation = await wifiService.validateNetwork(validationRequest);
+      } else if (networkInfo.type === 'ethernet' && networkInfo.ethernet) {
+        const validationRequest = {
+          macAddress: networkInfo.ethernet.macAddress,
+        };
+        console.log('[Frontend DEBUG] Ethernet validation request:', validationRequest);
+        validation = await wifiService.validateNetwork(validationRequest);
+      } else {
+        console.error('[Frontend DEBUG] Invalid network information structure');
+        setNetworkValidation({
+          isValid: false,
+          networkInfo: null,
+          reason: 'Invalid network information',
+          loading: false,
+        });
+        isCheckingWifi.current = false;
+        return;
+      }
+
+      console.log('[Frontend DEBUG] Validation result:', JSON.stringify(validation, null, 2));
+      setNetworkValidation({
         isValid: validation.allowed,
-        currentWifi: wifiInfo,
+        networkInfo: networkInfo,
         reason: validation.reason,
         loading: false,
       });
+      console.log('[Frontend DEBUG] Network validation complete. isValid:', validation.allowed);
     } catch (err: any) {
-      console.error('Wi-Fi validation error:', err);
-      setWifiValidation({
+      console.error('[Frontend DEBUG] ✗ Error checking network status:', err);
+      console.error('[Frontend DEBUG] Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        stack: err.stack,
+      });
+      setNetworkValidation({
         isValid: false,
-        currentWifi: null,
-        reason: 'Failed to validate Wi-Fi network',
+        networkInfo: null,
+        reason: err.response?.data?.message || 'Failed to validate network connection',
         loading: false,
       });
     } finally {
       isCheckingWifi.current = false;
+      console.log('[Frontend DEBUG] checkNetworkStatus() completed');
     }
   };
 
@@ -138,12 +187,12 @@ export const EmployeeAttendance: React.FC = () => {
   };
 
   const handleCheckIn = async () => {
-    // Re-validate Wi-Fi before check-in
-    await checkWifiStatus();
+    // Re-validate network before check-in
+    await checkNetworkStatus();
     
-    // Check if Wi-Fi is valid after validation
-    if (wifiValidation.isValid === false) {
-      setError(wifiValidation.reason || 'Wi-Fi network is not approved for attendance');
+    // Check if network is valid after validation
+    if (networkValidation.isValid === false) {
+      setError(networkValidation.reason || 'Network connection is not approved for attendance');
       return;
     }
 
@@ -151,23 +200,26 @@ export const EmployeeAttendance: React.FC = () => {
     setError(null);
 
     try {
-      // Get Wi-Fi info if available
-      let wifiInfo: WifiInfo | null = null;
-      if (window.electronAPI) {
-        try {
-          wifiInfo = await window.electronAPI.getCurrentWifi();
-        } catch (err) {
-          console.error('Failed to get Wi-Fi info:', err);
+      // The attendance service will automatically get network info if not provided
+      // But we can also pass it explicitly if we have it
+      const checkInRequest: any = {
+        source: AttendanceSource.DESKTOP,
+      };
+
+      if (networkValidation.networkInfo) {
+        if (networkValidation.networkInfo.type === 'wifi' && networkValidation.networkInfo.wifi) {
+          checkInRequest.wifi = {
+            ssid: networkValidation.networkInfo.wifi.ssid,
+            bssid: networkValidation.networkInfo.wifi.bssid || undefined,
+          };
+        } else if (networkValidation.networkInfo.type === 'ethernet' && networkValidation.networkInfo.ethernet) {
+          checkInRequest.ethernet = {
+            macAddress: networkValidation.networkInfo.ethernet.macAddress,
+          };
         }
       }
 
-      const record = await attendanceService.checkIn({
-        source: AttendanceSource.DESKTOP,
-        wifi: wifiInfo?.ssid ? {
-          ssid: wifiInfo.ssid,
-          bssid: wifiInfo.bssid || undefined,
-        } : undefined,
-      });
+      const record = await attendanceService.checkIn(checkInRequest);
       setTodayRecord(record);
       await loadStatus();
     } catch (err: any) {
@@ -180,12 +232,12 @@ export const EmployeeAttendance: React.FC = () => {
   };
 
   const handleCheckOut = async () => {
-    // Re-validate Wi-Fi before check-out
-    await checkWifiStatus();
+    // Re-validate network before check-out
+    await checkNetworkStatus();
     
-    // Check if Wi-Fi is valid after validation
-    if (wifiValidation.isValid === false) {
-      setError(wifiValidation.reason || 'Wi-Fi network is not approved for attendance');
+    // Check if network is valid after validation
+    if (networkValidation.isValid === false) {
+      setError(networkValidation.reason || 'Network connection is not approved for attendance');
       return;
     }
 
@@ -193,23 +245,26 @@ export const EmployeeAttendance: React.FC = () => {
     setError(null);
 
     try {
-      // Get Wi-Fi info if available
-      let wifiInfo: WifiInfo | null = null;
-      if (window.electronAPI) {
-        try {
-          wifiInfo = await window.electronAPI.getCurrentWifi();
-        } catch (err) {
-          console.error('Failed to get Wi-Fi info:', err);
+      // The attendance service will automatically get network info if not provided
+      // But we can also pass it explicitly if we have it
+      const checkOutRequest: any = {
+        source: AttendanceSource.DESKTOP,
+      };
+
+      if (networkValidation.networkInfo) {
+        if (networkValidation.networkInfo.type === 'wifi' && networkValidation.networkInfo.wifi) {
+          checkOutRequest.wifi = {
+            ssid: networkValidation.networkInfo.wifi.ssid,
+            bssid: networkValidation.networkInfo.wifi.bssid || undefined,
+          };
+        } else if (networkValidation.networkInfo.type === 'ethernet' && networkValidation.networkInfo.ethernet) {
+          checkOutRequest.ethernet = {
+            macAddress: networkValidation.networkInfo.ethernet.macAddress,
+          };
         }
       }
 
-      const record = await attendanceService.checkOut({
-        source: AttendanceSource.DESKTOP,
-        wifi: wifiInfo?.ssid ? {
-          ssid: wifiInfo.ssid,
-          bssid: wifiInfo.bssid || undefined,
-        } : undefined,
-      });
+      const record = await attendanceService.checkOut(checkOutRequest);
       setTodayRecord(record);
       await loadStatus();
     } catch (err: any) {
@@ -279,34 +334,40 @@ export const EmployeeAttendance: React.FC = () => {
 
       {error && <div className="attendance-error">{error}</div>}
 
-      {/* Wi-Fi Status Section - Only show in desktop app */}
+      {/* Network Status Section - Only show in desktop app */}
       {window.electronAPI && (
         <div className="attendance-wifi">
           <div className="wifi-info-header">
             <div className="wifi-info">
-              <span className="wifi-label">Current Wi-Fi:</span>
+              <span className="wifi-label">Current Connection:</span>
               <span className="wifi-name">
-                {wifiValidation.loading
+                {networkValidation.loading
                   ? 'Checking...'
-                  : wifiValidation.currentWifi?.ssid || 'Not connected'}
+                  : networkValidation.networkInfo?.type === 'wifi' && networkValidation.networkInfo.wifi
+                  ? `WiFi: ${networkValidation.networkInfo.wifi.ssid}`
+                  : networkValidation.networkInfo?.type === 'ethernet' && networkValidation.networkInfo.ethernet
+                  ? `Ethernet: ${networkValidation.networkInfo.ethernet.macAddress}${networkValidation.networkInfo.ethernet.adapterName ? ` (${networkValidation.networkInfo.ethernet.adapterName})` : ''}`
+                  : 'Not connected'}
               </span>
             </div>
             <button
               className="wifi-refresh-btn"
-              onClick={checkWifiStatus}
-              disabled={wifiValidation.loading}
-              title="Refresh Wi-Fi status"
+              onClick={checkNetworkStatus}
+              disabled={networkValidation.loading}
+              title="Refresh network status"
             >
               ↻
             </button>
           </div>
-          {wifiValidation.isValid === false && (
+          {networkValidation.isValid === false && (
             <div className="wifi-error">
-              {wifiValidation.reason || 'Wi-Fi network is not approved for attendance'}
+              {networkValidation.reason || 'Network connection is not approved for attendance'}
             </div>
           )}
-          {wifiValidation.isValid === true && (
-            <div className="wifi-success">✓ Connected to approved Wi-Fi network</div>
+          {networkValidation.isValid === true && networkValidation.networkInfo && (
+            <div className="wifi-success">
+              ✓ Connected to approved {networkValidation.networkInfo.type === 'wifi' ? 'WiFi' : 'Ethernet'} network
+            </div>
           )}
         </div>
       )}
@@ -341,8 +402,8 @@ export const EmployeeAttendance: React.FC = () => {
             disabled={
               loading ||
               !status.canCheckIn ||
-              (window.electronAPI && wifiValidation.isValid === false) ||
-              (window.electronAPI && wifiValidation.loading)
+              (window.electronAPI && networkValidation.isValid === false) ||
+              (window.electronAPI && networkValidation.loading)
             }
           >
             {loading ? 'Processing...' : 'Check In'}
@@ -353,8 +414,8 @@ export const EmployeeAttendance: React.FC = () => {
             disabled={
               loading ||
               !status.canCheckOut ||
-              (window.electronAPI && wifiValidation.isValid === false) ||
-              (window.electronAPI && wifiValidation.loading)
+              (window.electronAPI && networkValidation.isValid === false) ||
+              (window.electronAPI && networkValidation.loading)
             }
           >
             {loading ? 'Processing...' : 'Check Out'}
