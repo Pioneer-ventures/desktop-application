@@ -23,6 +23,10 @@ export interface ElectronAPI {
   platform: string;
   getCurrentWifi: () => Promise<WifiInfo>;
   getCurrentNetwork: () => Promise<NetworkInfo>;
+  openLogsViewer: () => Promise<boolean>;
+  getLogPath: () => Promise<string>;
+  triggerAutoCheckInOnLogin: () => Promise<any>;
+  triggerAutoCheckInOnAuthInit: () => Promise<any>;
 }
 
 declare global {

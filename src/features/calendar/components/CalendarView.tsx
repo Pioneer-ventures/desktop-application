@@ -16,6 +16,24 @@ interface CalendarViewProps {
   onEventClick: (event: CalendarEvent) => void;
   onEventUpdate: (event: CalendarEvent) => void;
   onEventDelete: (eventId: string) => void;
+  onEventContextMenu?: (event: CalendarEvent, position: { x: number; y: number }) => void;
+  onEventDragStart?: (event: CalendarEvent, e: React.MouseEvent) => void;
+  dragState?: {
+    isDragging: boolean;
+    task: CalendarEvent | null;
+    originalStartTime: Date;
+    originalEndTime: Date;
+    dragStartX: number;
+    dragStartY: number;
+  } | null;
+  hoveredDropTarget?: {
+    day: Date;
+    hour: number;
+    minute: number;
+  } | null;
+  isValidDrop?: boolean;
+  getEventStatusStyles: (event: CalendarEvent) => React.CSSProperties;
+  getStatusColor: (status: CalendarEventStatus) => string;
   loading?: boolean;
   sidebarCollapsed: boolean;
 }
@@ -27,6 +45,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onEventClick,
   onEventUpdate,
   onEventDelete,
+  onEventContextMenu,
+  onEventDragStart,
+  dragState,
+  hoveredDropTarget,
+  isValidDrop,
+  getEventStatusStyles,
+  getStatusColor,
   loading,
   sidebarCollapsed,
 }) => {
@@ -40,6 +65,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             onEventClick={onEventClick}
             onEventUpdate={onEventUpdate}
             onEventDelete={onEventDelete}
+            onEventContextMenu={onEventContextMenu}
+            onEventDragStart={onEventDragStart}
+            dragState={dragState}
+            hoveredDropTarget={hoveredDropTarget}
+            isValidDrop={isValidDrop}
+            getEventStatusStyles={getEventStatusStyles}
           />
         );
       case 'week':
@@ -50,6 +81,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             onEventClick={onEventClick}
             onEventUpdate={onEventUpdate}
             onEventDelete={onEventDelete}
+            onEventContextMenu={onEventContextMenu}
+            onEventDragStart={onEventDragStart}
+            dragState={dragState}
+            hoveredDropTarget={hoveredDropTarget}
+            isValidDrop={isValidDrop}
+            getEventStatusStyles={getEventStatusStyles}
           />
         );
       case 'month':
@@ -60,6 +97,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             onEventClick={onEventClick}
             onEventUpdate={onEventUpdate}
             onEventDelete={onEventDelete}
+            onEventContextMenu={onEventContextMenu}
           />
         );
       default:

@@ -1,12 +1,13 @@
 /**
  * Shift & Attendance Section - Central control for attendance behavior
+ * Uses shift assignment API for managing employee shift assignments
  */
 
 import React, { useState, useEffect } from 'react';
 import { EmployeeDetails, UpdateEmployeeDetailsRequest, AttendanceMode } from '@/types';
 import { SectionWrapper } from '@/components/EmployeeDetails/SectionWrapper';
 import { shiftService } from '@/services/shift.service';
-import { Shift } from '@/types/shift';
+import { Shift, ShiftAssignment, CreateShiftAssignmentRequest } from '@/types/shift';
 import './ShiftAttendanceSection.css';
 
 interface ShiftAttendanceSectionProps {
@@ -27,13 +28,18 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
   onUnsavedChange,
 }) => {
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [currentAssignment, setCurrentAssignment] = useState<ShiftAssignment | null>(null);
   const [loadingShifts, setLoadingShifts] = useState(false);
+  const [loadingAssignment, setLoadingAssignment] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (isExpanded && canEdit) {
       loadShifts();
+      loadCurrentAssignment();
     }
-  }, [isExpanded, canEdit]);
+  }, [isExpanded, canEdit, employee.id]);
 
   const loadShifts = async () => {
     try {
@@ -47,29 +53,121 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
     }
   };
 
+  const loadCurrentAssignment = async () => {
+    try {
+      setLoadingAssignment(true);
+      const assignment = await shiftService.getEmployeeShift(employee.id);
+      setCurrentAssignment(assignment);
+    } catch (error) {
+      console.error('Failed to load current assignment:', error);
+      setCurrentAssignment(null);
+    } finally {
+      setLoadingAssignment(false);
+    }
+  };
+
   const handleShiftChange = async (shiftId: string) => {
-    const update: UpdateEmployeeDetailsRequest = {
-      assignedShiftId: shiftId || undefined,
-      shiftAssignmentType: shiftId ? 'permanent' : undefined,
-    };
-    await onUpdate(update);
-    onUnsavedChange(false);
+    setError(null);
+    try {
+      if (!shiftId) {
+        // Remove shift assignment
+        if (currentAssignment) {
+          await shiftService.cancelAssignment(currentAssignment.id);
+          setCurrentAssignment(null);
+        }
+        // Also clear from user model for backward compatibility
+        const update: UpdateEmployeeDetailsRequest = {
+          assignedShiftId: undefined,
+          shiftAssignmentType: undefined,
+        };
+        await onUpdate(update);
+      } else {
+        // Create or update shift assignment
+        if (currentAssignment) {
+          // Update existing assignment
+          await shiftService.updateAssignment(currentAssignment.id, {
+            shiftId: shiftId,
+            assignmentType: 'permanent',
+          });
+          // Reload assignment to get updated data
+          await loadCurrentAssignment();
+        } else {
+          // Create new assignment
+          const assignmentRequest: CreateShiftAssignmentRequest = {
+            assignmentMode: 'individual',
+            employeeId: employee.id,
+            shiftId: shiftId,
+            assignmentType: 'permanent',
+            startDate: new Date().toISOString().split('T')[0],
+          };
+          const result = await shiftService.createAssignment(assignmentRequest);
+          // Check for warnings in response
+          if ((result as any).warning) {
+            setWarning((result as any).warning);
+            // Clear warning after 10 seconds
+            setTimeout(() => setWarning(null), 10000);
+          }
+          // Reload assignment to get created data
+          await loadCurrentAssignment();
+        }
+        // Also update user model for backward compatibility
+        const update: UpdateEmployeeDetailsRequest = {
+          assignedShiftId: shiftId,
+          shiftAssignmentType: 'permanent',
+        };
+        await onUpdate(update);
+      }
+      onUnsavedChange(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update shift assignment');
+      console.error('Failed to update shift assignment:', err);
+    }
   };
 
   const handleAssignmentTypeChange = async (type: string) => {
-    const update: UpdateEmployeeDetailsRequest = {
-      shiftAssignmentType: type as any,
-    };
-    await onUpdate(update);
-    onUnsavedChange(false);
+    setError(null);
+    try {
+      if (currentAssignment) {
+        await shiftService.updateAssignment(currentAssignment.id, {
+          assignmentType: type as any,
+        });
+        await loadCurrentAssignment();
+      }
+      // Also update user model for backward compatibility
+      const update: UpdateEmployeeDetailsRequest = {
+        shiftAssignmentType: type as any,
+      };
+      await onUpdate(update);
+      onUnsavedChange(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update assignment type');
+      console.error('Failed to update assignment type:', err);
+    }
   };
 
   const handleDateChange = async (field: string, value: string) => {
-    const update: UpdateEmployeeDetailsRequest = {
-      [field]: value || undefined,
-    };
-    await onUpdate(update);
-    onUnsavedChange(false);
+    setError(null);
+    try {
+      if (currentAssignment) {
+        const updateData: any = {};
+        if (field === 'shiftEffectiveFrom') {
+          updateData.startDate = value;
+        } else if (field === 'shiftEffectiveTo') {
+          updateData.endDate = value || undefined;
+        }
+        await shiftService.updateAssignment(currentAssignment.id, updateData);
+        await loadCurrentAssignment();
+      }
+      // Also update user model for backward compatibility
+      const update: UpdateEmployeeDetailsRequest = {
+        [field]: value || undefined,
+      };
+      await onUpdate(update);
+      onUnsavedChange(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update date');
+      console.error('Failed to update date:', err);
+    }
   };
 
   const handleAttendanceModeChange = async (mode: string) => {
@@ -88,6 +186,14 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
     onUnsavedChange(false);
   };
 
+  // Determine displayed shift info - prefer current assignment, fallback to employee.assignedShift
+  const displayShift = currentAssignment?.shiftId 
+    ? shifts.find(s => s.id === currentAssignment.shiftId) 
+    : employee.assignedShift;
+  const displayAssignmentType = currentAssignment?.assignmentType || employee.shiftAssignmentType;
+  const displayStartDate = currentAssignment?.startDate || employee.shiftEffectiveFrom;
+  const displayEndDate = currentAssignment?.endDate || employee.shiftEffectiveTo;
+
   return (
     <SectionWrapper
       title="Shift & Attendance Configuration"
@@ -96,15 +202,25 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
       onToggle={onToggle}
     >
       <div className="shift-attendance-content">
+        {error && (
+          <div className="shift-attendance-error" style={{ color: 'red', marginBottom: '1rem', padding: '0.5rem', backgroundColor: '#fee', borderRadius: '4px' }}>
+            {error}
+          </div>
+        )}
+        {warning && (
+          <div className="shift-attendance-warning" style={{ color: '#856404', marginBottom: '1rem', padding: '0.5rem', backgroundColor: '#fff3cd', borderRadius: '4px', borderLeft: '4px solid #ffc107' }}>
+            ⚠️ {warning}
+          </div>
+        )}
         <div className="shift-attendance-grid">
           {canEdit ? (
             <div className="form-field">
               <label className="field-label">Assigned Shift</label>
               <select
                 className="form-select"
-                value={employee.assignedShift?.id || ''}
+                value={displayShift?.id || (employee.assignedShift?.id || '')}
                 onChange={(e) => handleShiftChange(e.target.value)}
-                disabled={!canEdit || loadingShifts}
+                disabled={!canEdit || loadingShifts || loadingAssignment}
               >
                 <option value="">No shift assigned</option>
                 {shifts.map((shift) => (
@@ -113,13 +229,15 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
                   </option>
                 ))}
               </select>
-              <small className="field-hint">Changes do not retroactively affect attendance</small>
+              <small className="field-hint">Uses shift assignment API - changes do not retroactively affect attendance</small>
             </div>
           ) : (
             <div className="form-field">
               <label className="field-label">Assigned Shift</label>
               <div className="field-value read-only">
-                {employee.assignedShift
+                {displayShift
+                  ? `${displayShift.name} (${displayShift.code})`
+                  : employee.assignedShift
                   ? `${employee.assignedShift.name} (${employee.assignedShift.code})`
                   : '—'}
               </div>
@@ -131,9 +249,9 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
               <label className="field-label">Assignment Type</label>
               <select
                 className="form-select"
-                value={employee.shiftAssignmentType || ''}
+                value={displayAssignmentType || ''}
                 onChange={(e) => handleAssignmentTypeChange(e.target.value)}
-                disabled={!canEdit}
+                disabled={!canEdit || !currentAssignment || loadingAssignment}
               >
                 <option value="">Select type</option>
                 <option value="permanent">Permanent</option>
@@ -141,17 +259,20 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
                 <option value="rotational">Rotational</option>
                 <option value="override">Override</option>
               </select>
+              {!currentAssignment && (
+                <small className="field-hint">Create a shift assignment first to change type</small>
+              )}
             </div>
           ) : (
             <div className="form-field">
               <label className="field-label">Assignment Type</label>
               <div className="field-value read-only">
-                {employee.shiftAssignmentType || '—'}
+                {displayAssignmentType || '—'}
               </div>
             </div>
           )}
 
-          {(employee.shiftAssignmentType === 'temporary' || employee.shiftAssignmentType === 'override') && (
+          {(displayAssignmentType === 'temporary' || displayAssignmentType === 'override') && (
             <>
               <div className="form-field">
                 <label className="field-label">Effective From</label>
@@ -159,14 +280,14 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
                   <input
                     type="date"
                     className="form-input"
-                    value={employee.shiftEffectiveFrom ? employee.shiftEffectiveFrom.split('T')[0] : ''}
+                    value={displayStartDate ? (typeof displayStartDate === 'string' ? displayStartDate.split('T')[0] : new Date(displayStartDate).toISOString().split('T')[0]) : ''}
                     onChange={(e) => handleDateChange('shiftEffectiveFrom', e.target.value)}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !currentAssignment || loadingAssignment}
                   />
                 ) : (
                   <div className="field-value read-only">
-                    {employee.shiftEffectiveFrom
-                      ? new Date(employee.shiftEffectiveFrom).toLocaleDateString()
+                    {displayStartDate
+                      ? new Date(displayStartDate).toLocaleDateString()
                       : '—'}
                   </div>
                 )}
@@ -178,14 +299,14 @@ export const ShiftAttendanceSection: React.FC<ShiftAttendanceSectionProps> = ({
                   <input
                     type="date"
                     className="form-input"
-                    value={employee.shiftEffectiveTo ? employee.shiftEffectiveTo.split('T')[0] : ''}
+                    value={displayEndDate ? (typeof displayEndDate === 'string' ? displayEndDate.split('T')[0] : new Date(displayEndDate).toISOString().split('T')[0]) : ''}
                     onChange={(e) => handleDateChange('shiftEffectiveTo', e.target.value)}
-                    disabled={!canEdit}
+                    disabled={!canEdit || !currentAssignment || loadingAssignment}
                   />
                 ) : (
                   <div className="field-value read-only">
-                    {employee.shiftEffectiveTo
-                      ? new Date(employee.shiftEffectiveTo).toLocaleDateString()
+                    {displayEndDate
+                      ? new Date(displayEndDate).toLocaleDateString()
                       : '—'}
                   </div>
                 )}

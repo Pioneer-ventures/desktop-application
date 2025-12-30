@@ -101,7 +101,7 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
     console.log('[Frontend DEBUG] checkNetworkStatus() called');
     // Only check network if Electron API is available (desktop app)
     if (!window.electronAPI) {
-      console.log('[Frontend DEBUG] No electronAPI available, skipping network check');
+       
       // Not in desktop app - network validation not applicable
       setNetworkValidation({
         isValid: true, // Allow attendance for non-desktop sources
@@ -113,11 +113,11 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
 
     // Don't start a new check if one is already in progress
     if (isCheckingWifi.current) {
-      console.log('[Frontend DEBUG] Network check already in progress, skipping');
+       
       return;
     }
 
-    console.log('[Frontend DEBUG] Starting network check...');
+     
     isCheckingWifi.current = true;
     setNetworkValidation(prev => ({ ...prev, loading: true }));
 
@@ -128,7 +128,7 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
       console.log('[Frontend DEBUG] getCurrentNetwork() returned:', JSON.stringify(networkInfo, null, 2));
 
       if (networkInfo.type === 'none') {
-        console.log('[Frontend DEBUG] Network type is "none", showing error');
+         
         setNetworkValidation({
           isValid: false,
           networkInfo: null,
@@ -139,28 +139,28 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
         return;
       }
 
-      console.log(`[Frontend DEBUG] Network type: ${networkInfo.type}`);
+       
       if (networkInfo.type === 'wifi') {
-        console.log(`[Frontend DEBUG] WiFi info:`, networkInfo.wifi);
+         
       } else if (networkInfo.type === 'ethernet') {
-        console.log(`[Frontend DEBUG] Ethernet info:`, networkInfo.ethernet);
+         
       }
 
       // Validate network with backend (WiFi or Ethernet)
-      console.log('[Frontend DEBUG] Validating network with backend...');
+       
       let validation;
       if (networkInfo.type === 'wifi' && networkInfo.wifi) {
         const validationRequest = {
           ssid: networkInfo.wifi.ssid,
           bssid: networkInfo.wifi.bssid || undefined,
         };
-        console.log('[Frontend DEBUG] WiFi validation request:', validationRequest);
+         
         validation = await wifiService.validateNetwork(validationRequest);
       } else if (networkInfo.type === 'ethernet' && networkInfo.ethernet) {
         const validationRequest = {
           macAddress: networkInfo.ethernet.macAddress,
         };
-        console.log('[Frontend DEBUG] Ethernet validation request:', validationRequest);
+         
         validation = await wifiService.validateNetwork(validationRequest);
       } else {
         console.error('[Frontend DEBUG] Invalid network information structure');
@@ -181,7 +181,7 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
         reason: validation.reason,
         loading: false,
       });
-      console.log('[Frontend DEBUG] Network validation complete. isValid:', validation.allowed);
+       
     } catch (err: any) {
       console.error('[Frontend DEBUG] ✗ Error checking network status:', err);
       console.error('[Frontend DEBUG] Error details:', {
@@ -238,8 +238,13 @@ export const SelfAttendance: React.FC<SelfAttendanceProps> = ({ canMarkAttendanc
         }
       }
 
-      const record = await attendanceService.checkIn(checkInRequest);
-      setTodayRecord(record);
+      const result = await attendanceService.checkIn(checkInRequest);
+      setTodayRecord(result.record);
+      // Display validation message if available
+      if (result.message && result.message !== 'Checked in successfully') {
+        // You can add a toast/notification here if needed
+         
+      }
       await loadStatus();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to check in');

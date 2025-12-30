@@ -37,7 +37,7 @@ export const TaskForm: React.FC<TaskFormProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { user } = authStore();
+  const user = authStore.getState().user;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assignableEmployees, setAssignableEmployees] = useState<AssignableEmployee[]>([]);

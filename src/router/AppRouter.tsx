@@ -1,23 +1,40 @@
 /**
  * Application Router
+ * Optimized with lazy loading for better performance and smaller initial bundle
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { ProtectedRoute, DashboardRedirect } from '@/shared/components/routing';
 import { AppLayout } from '@/shared/components/layout';
-import { LoginPage } from '@/pages/Login/LoginPage';
-import { AttendancePage } from '@/pages/Attendance/AttendancePage';
-import { ReportsPage } from '@/pages/Reports/ReportsPage';
-import { AdminReportsPage } from '@/pages/Reports/AdminReportsPage';
-import { CalendarPage } from '@/pages/Calendar/CalendarPage';
-import { SettingsPage } from '@/pages/Settings/SettingsPage';
-import { AdminPage } from '@/pages/Admin/AdminPage';
-import { HRPage } from '@/pages/HR/HRPage';
-import { ManagerPage } from '@/pages/Manager/ManagerPage';
-import { EmployeePage } from '@/pages/Employee/EmployeePage';
-import { EmployeeDetailsPage } from '@/pages/Employee/EmployeeDetailsPage';
 import { UserRole } from '@/types';
+
+// Lazy load pages for code splitting - reduces initial bundle size
+const LoginPage = lazy(() => import('@/pages/Login/LoginPage').then(module => ({ default: module.LoginPage })));
+const AttendancePage = lazy(() => import('@/pages/Attendance/AttendancePage').then(module => ({ default: module.AttendancePage })));
+const ReportsPage = lazy(() => import('@/pages/Reports/ReportsPage').then(module => ({ default: module.ReportsPage })));
+const AdminReportsPage = lazy(() => import('@/pages/Reports/AdminReportsPage').then(module => ({ default: module.AdminReportsPage })));
+const CalendarPage = lazy(() => import('@/pages/Calendar/CalendarPage').then(module => ({ default: module.CalendarPage })));
+const SettingsPage = lazy(() => import('@/pages/Settings/SettingsPage').then(module => ({ default: module.SettingsPage })));
+const AdminPage = lazy(() => import('@/pages/Admin/AdminPage').then(module => ({ default: module.AdminPage })));
+const HRPage = lazy(() => import('@/pages/HR/HRPage').then(module => ({ default: module.HRPage })));
+const ManagerPage = lazy(() => import('@/pages/Manager/ManagerPage').then(module => ({ default: module.ManagerPage })));
+const EmployeePage = lazy(() => import('@/pages/Employee/EmployeePage').then(module => ({ default: module.EmployeePage })));
+const EmployeeDetailsPage = lazy(() => import('@/pages/Employee/EmployeeDetailsPage').then(module => ({ default: module.EmployeeDetailsPage })));
+
+// Loading fallback component
+const PageLoader: React.FC = () => (
+  <div style={{ 
+    display: 'flex', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    height: '100vh',
+    fontSize: '18px',
+    color: '#666'
+  }}>
+    Loading...
+  </div>
+);
 
 // Component to handle IPC messages for logs viewer (must be inside Router)
 const LogsViewerHandler: React.FC = () => {
@@ -46,83 +63,85 @@ export const AppRouter: React.FC = () => {
   return (
     <HashRouter>
       <LogsViewerHandler />
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/login" element={<LoginPage />} />
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/login" element={<LoginPage />} />
 
-        {/* Protected Routes */}
-        <Route element={<ProtectedRoute />}>
-          <Route element={<AppLayout />}>
-            {/* Dashboard redirects to role-specific dashboard */}
-            <Route path="/dashboard" element={<DashboardRedirect />} />
-            <Route path="/attendance" element={<AttendancePage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route
-              path="/reports/admin"
-              element={
-                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
-                  <AdminReportsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="/calendar" element={<CalendarPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+          {/* Protected Routes */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              {/* Dashboard redirects to role-specific dashboard */}
+              <Route path="/dashboard" element={<DashboardRedirect />} />
+              <Route path="/attendance" element={<AttendancePage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route
+                path="/reports/admin"
+                element={
+                  <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <AdminReportsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/calendar" element={<CalendarPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
 
-            {/* Role-specific routes */}
-            <Route
-              path="/admin"
-              element={
-                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
-                  <AdminPage />
-                </ProtectedRoute>
-              }
-            />
+              {/* Role-specific routes */}
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <AdminPage />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/hr"
-              element={
-                <ProtectedRoute allowedRoles={[UserRole.HR]}>
-                  <HRPage />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/hr"
+                element={
+                  <ProtectedRoute allowedRoles={[UserRole.HR]}>
+                    <HRPage />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/manager"
-              element={
-                <ProtectedRoute allowedRoles={[UserRole.MANAGER]}>
-                  <ManagerPage />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/manager"
+                element={
+                  <ProtectedRoute allowedRoles={[UserRole.MANAGER]}>
+                    <ManagerPage />
+                  </ProtectedRoute>
+                }
+              />
 
-            <Route
-              path="/employee"
-              element={
-                <ProtectedRoute allowedRoles={[UserRole.EMPLOYEE]}>
-                  <EmployeePage />
-                </ProtectedRoute>
-              }
-            />
+              <Route
+                path="/employee"
+                element={
+                  <ProtectedRoute allowedRoles={[UserRole.EMPLOYEE]}>
+                    <EmployeePage />
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Employee Details (HR/Admin/Manager) */}
-            <Route
-              path="/employees/:id/details"
-              element={
-                <ProtectedRoute allowedRoles={[UserRole.HR, UserRole.ADMIN, UserRole.MANAGER]}>
-                  <EmployeeDetailsPage />
-                </ProtectedRoute>
-              }
-            />
+              {/* Employee Details (HR/Admin/Manager) */}
+              <Route
+                path="/employees/:id/details"
+                element={
+                  <ProtectedRoute allowedRoles={[UserRole.HR, UserRole.ADMIN, UserRole.MANAGER]}>
+                    <EmployeeDetailsPage />
+                  </ProtectedRoute>
+                }
+              />
 
-            {/* Default redirect - goes to dashboard which redirects to role-specific */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              {/* Default redirect - goes to dashboard which redirects to role-specific */}
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            </Route>
           </Route>
-        </Route>
 
-        {/* Catch all - redirect to login */}
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+          {/* Catch all - redirect to login */}
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     </HashRouter>
   );
 };

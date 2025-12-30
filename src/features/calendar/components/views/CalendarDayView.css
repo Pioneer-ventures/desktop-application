@@ -56,6 +56,16 @@
 .calendar-day-view-hour-slot {
   height: 60px;
   border-bottom: 1px solid var(--color-border-light);
+  transition: background-color 0.15s;
+}
+
+.calendar-day-view-hour-slot.drag-hover-valid {
+  background-color: rgba(37, 99, 235, 0.1);
+}
+
+.calendar-day-view-hour-slot.drag-hover-invalid {
+  background-color: rgba(220, 38, 38, 0.1);
+  cursor: not-allowed;
 }
 
 .calendar-day-view-event {
@@ -64,18 +74,26 @@
   color: white;
   padding: var(--spacing-xs) var(--spacing-sm);
   border-radius: var(--border-radius);
-  cursor: pointer;
+  cursor: grab;
   overflow: hidden;
   z-index: 1;
   min-height: 40px;
   margin: 0 1px; /* Small gap between columns */
   box-sizing: border-box;
+  transition: box-shadow 0.2s, opacity 0.2s;
+  user-select: none;
 }
 
-.calendar-day-view-event:hover {
+.calendar-day-view-event:hover:not(.dragging) {
   opacity: 0.9;
   z-index: 10;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.calendar-day-view-event.dragging {
+  cursor: grabbing !important;
+  opacity: 0.5;
+  z-index: 1000;
 }
 
 .calendar-day-view-event-title {

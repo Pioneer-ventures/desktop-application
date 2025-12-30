@@ -4,6 +4,16 @@
   height: 100%;
   overflow: auto;
 }
+.calendar-month-view-day.hovered {
+  background-color: rgba(59, 130, 246, 0.08); /* subtle blue */
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  transition: background-color 0.15s ease, border 0.15s ease;
+}
+
+.calendar-month-view-day.today.hovered {
+  background-color: rgba(59, 130, 246, 0.15);
+}
+
 
 .calendar-month-view-header {
   display: grid;

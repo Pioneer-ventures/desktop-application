@@ -92,9 +92,14 @@ class ShiftService {
   /**
    * Create shift assignment
    */
-  async createAssignment(data: CreateShiftAssignmentRequest): Promise<ShiftAssignment> {
+  async createAssignment(data: CreateShiftAssignmentRequest): Promise<ShiftAssignment & { warning?: string }> {
     const response = await api.post('/shifts/assignments', data);
-    return response.data.data;
+    const assignment = response.data.data;
+    // Include warning if present in response
+    if (response.data.warning) {
+      (assignment as any).warning = response.data.warning;
+    }
+    return assignment;
   }
 
   /**

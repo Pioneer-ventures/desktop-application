@@ -22,6 +22,7 @@ export enum CalendarEventStatus {
   TENTATIVE = 'tentative',
   CONFIRMED = 'confirmed',
   IN_PROGRESS = 'in_progress',
+  BLOCKED = 'blocked',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
 }

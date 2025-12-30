@@ -41,6 +41,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLogPath: (): Promise<string> => {
     return ipcRenderer.invoke('get-log-path');
   },
+  
+  // Auto attendance
+  triggerAutoCheckInOnLogin: (): Promise<any> => {
+    return ipcRenderer.invoke('auto-attendance:on-login');
+  },
+  
+  triggerAutoCheckInOnAuthInit: (): Promise<any> => {
+    return ipcRenderer.invoke('auto-attendance:on-auth-init');
+  },
 });
 
 // Listen for IPC messages from main process

@@ -1,9 +1,18 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain, powerMonitor } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as os from 'os';
+
+// Auto attendance services
+import { autoAttendanceService } from './services/auto-attendance.service';
+import { sessionService } from './services/session.service';
+import { configService } from './services/config.service';
+
+// Network utilities
+import { getCurrentNetwork, getCurrentWifi, NetworkInfo, WifiInfo } from './utils/network.util';
 
 const execAsync = promisify(exec);
 // Keep a global reference of the window object
@@ -18,7 +27,7 @@ if (process.platform === 'win32') {
   // Set a custom cache directory to avoid permission issues
   const cachePath = path.join(app.getPath('userData'), 'Cache');
   app.setPath('cache', cachePath);
-  
+
   // Suppress console errors for cache issues (these are non-critical)
   const originalConsoleError = console.error;
   console.error = (...args: any[]) => {
@@ -76,6 +85,7 @@ function createWindow(): void {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: true, // Keep security enabled
+      devTools: isDev, // Only allow DevTools in development
     },
     titleBarStyle: 'default',
     autoHideMenuBar: true, // Hide the menu bar
@@ -88,8 +98,6 @@ function createWindow(): void {
   // Load the app
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    // Open DevTools in development
-    mainWindow.webContents.openDevTools();
   } else {
     // In production, use loadURL with proper file:// path format
     const possiblePaths = [
@@ -106,7 +114,7 @@ function createWindow(): void {
         // C:\path\to\file -> file:///C:/path/to/file
         const normalizedPath = htmlPath.replace(/\\/g, '/');
         const fileUrl = `file:///${normalizedPath}`;
-        
+
         mainWindow.loadURL(fileUrl);
         loaded = true;
         break;
@@ -136,6 +144,11 @@ function createWindow(): void {
     });
   }
 
+  // Open DevTools on startup only in development
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
+
   // Handle window close - hide to tray instead of closing
   mainWindow.on('close', (event) => {
     if (!appIsQuitting) {
@@ -144,8 +157,12 @@ function createWindow(): void {
     }
   });
 
+  // Set main window reference in session service for IPC communication
+  sessionService.setMainWindow(mainWindow);
+
   // Emitted when the window is actually closed
   mainWindow.on('closed', () => {
+    sessionService.setMainWindow(null);
     mainWindow = null;
   });
 }
@@ -153,7 +170,7 @@ function createWindow(): void {
 // Create system tray
 function createTray(): void {
   const iconPath = getIconPath();
-  
+
   if (!iconPath) {
     return; // Can't create tray without icon
   }
@@ -245,6 +262,83 @@ function createTray(): void {
 // Prevent app from quitting when all windows are closed
 let appIsQuitting = false;
 
+// Setup auto-start configuration
+function setupAutoStart(): void {
+  try {
+    const autoStartEnabled = configService.isAutoStartEnabled();
+
+    app.setLoginItemSettings({
+      openAtLogin: autoStartEnabled,
+      openAsHidden: true, // Start minimized to tray
+      name: 'HRMS Desktop',
+      args: ['--hidden'], // Hidden flag for startup
+    });
+  } catch (error) {
+    console.error('[AutoStart] Failed to configure auto-start:', error);
+  }
+}
+
+// Setup auto attendance system
+function setupAutoAttendance(): void {
+  // Note: App start auto check-in is now handled via IPC after auth initialization
+  // This is triggered from the renderer process after initializeAuth completes
+  // This ensures the window is ready and auth state is properly loaded
+
+  // 2. System wake detection
+  if (powerMonitor) {
+    powerMonitor.on('resume', () => {
+
+      // Wait 5 seconds for network to reconnect
+      setTimeout(() => {
+        autoAttendanceService.attemptAutoCheckIn('system_wake').catch((error) => {
+          console.error('[AutoAttendance] System wake check-in failed:', error);
+        });
+      }, 5000);
+    });
+  }
+
+  // 3. Network change detection (polling)
+  let lastNetworkState: string | null = null;
+  let networkChangeDebounceTimer: NodeJS.Timeout | null = null;
+
+  const checkNetworkChange = async () => {
+    try {
+      const networkInfo = await getCurrentNetwork();
+      const currentState = JSON.stringify({
+        type: networkInfo.type,
+        ssid: networkInfo.wifi?.ssid,
+        bssid: networkInfo.wifi?.bssid,
+        macAddress: networkInfo.ethernet?.macAddress,
+      });
+
+      if (lastNetworkState !== null && lastNetworkState !== currentState) {
+
+
+        // Debounce network change (wait 3 seconds for connection to stabilize)
+        if (networkChangeDebounceTimer) {
+          clearTimeout(networkChangeDebounceTimer);
+        }
+
+        networkChangeDebounceTimer = setTimeout(() => {
+          autoAttendanceService.attemptAutoCheckIn('network_change').catch((error) => {
+            console.error('[AutoAttendance] Network change check-in failed:', error);
+          });
+        }, 3000);
+      }
+
+      lastNetworkState = currentState;
+    } catch (error) {
+      console.error('[AutoAttendance] Network change detection error:', error);
+    }
+  };
+
+  // Poll network every 5 seconds
+  setInterval(checkNetworkChange, 5000);
+
+  // Initial network state check
+  checkNetworkChange();
+}
+
 // Configure auto-updater
 function setupAutoUpdater(): void {
   // Disable auto-download (we'll handle it manually)
@@ -317,83 +411,109 @@ function setupAutoUpdater(): void {
   });
 }
 
-// This method will be called when Electron has finished initialization
-app.whenReady().then(() => {
-  // Set app icon after app is ready
-  const iconPath = getIconPath();
-  if (iconPath) {
-    // Set dock icon for macOS
-    if (process.platform === 'darwin' && app.dock) {
-      app.dock.setIcon(iconPath);
-    }
-    
-    // Set app user model ID for Windows (helps with taskbar icon)
-    if (process.platform === 'win32') {
-      app.setAppUserModelId('com.hrms.desktop');
-    }
-  }
+// Prevent multiple instances of the app
+const gotTheLock = app.requestSingleInstanceLock();
 
-  // Setup auto-updater
-  setupAutoUpdater();
-
-  // Create system tray first
-  createTray();
-
-  // Create main window
-  createWindow();
-
-  app.on('activate', () => {
-    // On macOS, re-create window when dock icon is clicked
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    } else if (mainWindow) {
+if (!gotTheLock) {
+  // Another instance is already running, quit this one
+  app.quit();
+} else {
+  // Handle when a second instance is attempted
+  app.on('second-instance', () => {
+    // Someone tried to run a second instance, focus our window instead
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
       mainWindow.show();
       mainWindow.focus();
+    } else {
+      // Window was destroyed, create a new one
+      createWindow();
     }
   });
-});
 
-// Network detection functions
-interface NetworkInfo {
-  type: 'wifi' | 'ethernet' | 'none';
-  wifi?: {
-    ssid: string;
-    bssid: string | null;
-  };
-  ethernet?: {
-    macAddress: string;
-    adapterName?: string;
-  };
+  // This method will be called when Electron has finished initialization
+  app.whenReady().then(() => {
+    // Set app icon after app is ready
+    const iconPath = getIconPath();
+    if (iconPath) {
+      // Set dock icon for macOS
+      if (process.platform === 'darwin' && app.dock) {
+        app.dock.setIcon(iconPath);
+      }
+
+      // Set app user model ID for Windows (helps with taskbar icon)
+      if (process.platform === 'win32') {
+        app.setAppUserModelId('com.hrms.desktop');
+      }
+    }
+
+    // Setup auto-updater
+    setupAutoUpdater();
+
+    // Setup auto-start
+    setupAutoStart();
+
+    // Setup auto attendance system
+    setupAutoAttendance();
+
+    // Create system tray first
+    createTray();
+
+    // Create main window
+    createWindow();
+
+    // Set main window reference for session service
+    sessionService.setMainWindow(mainWindow);
+
+    app.on('activate', () => {
+      // On macOS, re-create window when dock icon is clicked
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+        sessionService.setMainWindow(mainWindow);
+      } else if (mainWindow) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  });
 }
 
+// Network detection functions are now in utils/network.util.ts
+// Keeping IPC handlers here for backward compatibility
+
 /**
- * Get MAC address of Ethernet adapter
- * Cross-platform implementation
+ * Get MAC address of Ethernet adapter (deprecated - use network.util)
+ * @deprecated Use getEthernetMacAddress from utils/network.util
  */
 async function getEthernetMacAddress(): Promise<{ macAddress: string | null; adapterName?: string }> {
   const platform = process.platform;
   console.log(`[DEBUG] getEthernetMacAddress() called on platform: ${platform}`);
-  
+
   try {
     if (platform === 'win32') {
-      console.log('[DEBUG] Windows detected, starting Ethernet detection...');
+
       // Windows: Use getmac command and ipconfig to find active Ethernet adapters
       try {
         // Method 1: Use ipconfig /all to find active adapters with IP addresses (most reliable)
-        console.log('[DEBUG] Running ipconfig /all...');
+
         const { stdout: ipconfigOutput } = await execAsync('ipconfig /all');
-        console.log(`[DEBUG] ipconfig output length: ${ipconfigOutput.length} characters`);
+
         const ipconfigLines = ipconfigOutput.split(/\r?\n/);
-        console.log(`[DEBUG] ipconfig lines: ${ipconfigLines.length}`);
-        
+
+
         let currentAdapter = '';
         let currentMac = '';
         let hasIpAddress = false;
         const activeAdapters: Array<{ name: string; mac: string }> = [];
-        
+
         for (let i = 0; i < ipconfigLines.length; i++) {
           const line = ipconfigLines[i].trim();
-          
+
           // Check for adapter name (ends with : and doesn't start with space, not an IP line)
           if (line && line.endsWith(':') && !line.startsWith(' ') && !line.match(/^\d+\./)) {
             // Save previous adapter if it had MAC (even without IP, as USB adapters might show "Media disconnected" but still work)
@@ -416,16 +536,16 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
             currentMac = '';
             hasIpAddress = false;
           }
-          
+
           // Look for Physical Address
           if (line.includes('Physical Address') || line.includes('Physical address')) {
             const macMatch = line.match(/([0-9A-F]{2}[:-]){5}([0-9A-F]{2})/i);
             if (macMatch && currentAdapter) {
               currentMac = macMatch[0].replace(/-/g, ':').toUpperCase();
-              console.log(`[DEBUG] Found MAC ${currentMac} for adapter: ${currentAdapter}`);
+
             }
           }
-          
+
           // Check for IPv4 Address (indicates active connection)
           // Match IPv4 Address lines, but exclude Autoconfiguration ones
           if (line.includes('IPv4 Address') && !line.includes('Autoconfiguration')) {
@@ -433,11 +553,11 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
             const ipMatch = line.match(/IPv4 Address[^:]*:\s*(\d+\.\d+\.\d+\.\d+)(?:\(Preferred\))?/i);
             if (ipMatch && ipMatch[1] !== '0.0.0.0') {
               hasIpAddress = true;
-              console.log(`[DEBUG] Adapter ${currentAdapter} has IP address: ${ipMatch[1]}`);
+
             }
           }
         }
-        
+
         // Save last adapter if it had MAC
         if (currentAdapter && currentMac) {
           if (!/wireless|wlan|wi-fi|802\.11|wifi|qualcomm.*wireless|qca.*wireless/i.test(currentAdapter)) {
@@ -450,7 +570,7 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
             }
           }
         }
-        
+
         // Return first adapter (prioritizes those with IP addresses)
         console.log(`[DEBUG] Found ${activeAdapters.length} Ethernet adapter(s):`, activeAdapters.map(a => `${a.name} (${a.mac})`).join(', '));
         if (activeAdapters.length > 0) {
@@ -458,15 +578,15 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
           console.log(`[DEBUG] ✓ Selected Ethernet adapter: ${adapter.name} (${adapter.mac})`);
           return { macAddress: adapter.mac, adapterName: adapter.name };
         }
-        
+
         // Fallback: Try getmac as backup (for adapters not showing in ipconfig)
-        console.log('[DEBUG] ipconfig found no adapters, trying getmac fallback...');
+
         try {
           const { stdout: getmacOutput } = await execAsync('getmac /fo csv /nh /v');
-          console.log(`[DEBUG] getmac output:\n${getmacOutput}`);
+
           const getmacLines = getmacOutput.trim().split(/\r?\n/).filter(line => line.trim());
-          console.log(`[DEBUG] getmac lines: ${getmacLines.length}`);
-          
+
+
           for (const line of getmacLines) {
             // Format: "Connection Name","Network Adapter","Physical Address","Transport Name"
             const csvMatch = line.match(/^"([^"]*)","([^"]*)","([0-9A-F-]{17})"/i);
@@ -474,21 +594,21 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
               const connectionName = csvMatch[1];
               const adapterName = csvMatch[2];
               const macAddress = csvMatch[3];
-              
-              console.log(`[DEBUG] Processing getmac line: ${connectionName} / ${adapterName} / ${macAddress}`);
-              
+
+
+
               // Skip WiFi adapters
               if (/wireless|wlan|wi-fi|802\.11|wifi/i.test(connectionName) || /wireless|wlan|wi-fi|802\.11|wifi/i.test(adapterName)) {
-                console.log(`[DEBUG] Skipping WiFi adapter: ${adapterName}`);
+
                 continue;
               }
-              
+
               // Skip Bluetooth and virtual adapters (but keep USB Ethernet)
               if (/bluetooth|microsoft.*wifi.*direct/i.test(adapterName)) {
-                console.log(`[DEBUG] Skipping Bluetooth/virtual adapter: ${adapterName}`);
+
                 continue;
               }
-              
+
               // Keep Ethernet adapters (including USB)
               if (/ethernet/i.test(connectionName) || /ethernet|usb.*gb/i.test(adapterName)) {
                 const mac = macAddress.replace(/-/g, ':').toUpperCase();
@@ -500,10 +620,10 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
             }
           }
         } catch (getmacError: any) {
-          console.log('[DEBUG] getmac fallback failed:', getmacError.message);
+
         }
-        
-        console.log('[DEBUG] ✗ No Ethernet adapter found after checking ipconfig and getmac');
+
+
         return { macAddress: null };
       } catch (error: any) {
         console.error('[DEBUG] ✗ Windows Ethernet MAC detection error:', error.message || error);
@@ -516,22 +636,22 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
         // Get list of Ethernet adapters (en0, en1, etc., excluding en0 if it's WiFi)
         const { stdout: networksetup } = await execAsync('networksetup -listallhardwareports');
         const lines = networksetup.split(/\r?\n/);
-        
+
         let currentPort = '';
         let currentDevice = '';
-        
+
         for (const line of lines) {
           if (line.includes('Hardware Port:')) {
             currentPort = line.split(':')[1].trim();
           }
           if (line.includes('Device:')) {
             currentDevice = line.split(':')[1].trim();
-            
+
             // Skip WiFi ports
             if (/Wi-Fi|AirPort/i.test(currentPort)) {
               continue;
             }
-            
+
             // Get MAC address for this device
             if (currentDevice && currentDevice.startsWith('en')) {
               try {
@@ -555,24 +675,24 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
       try {
         const { stdout } = await execAsync('ip link show');
         const lines = stdout.split(/\r?\n/);
-        
+
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
-          
+
           // Skip WiFi interfaces (wlan, wlp, etc.)
           if (/^\d+:\s+(wlan|wlp|wl-)/i.test(line)) {
             continue;
           }
-          
+
           // Look for Ethernet interfaces (eth, enp, eno, etc.)
           if (/^\d+:\s+(eth|enp|eno|ens|em)/i.test(line)) {
             const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
             const macMatch = nextLine.match(/link\/ether\s+([0-9a-f:]{17})/i);
             if (macMatch) {
               const adapterMatch = line.match(/^\d+:\s+([^:]+):/);
-              return { 
-                macAddress: macMatch[1].toUpperCase(), 
-                adapterName: adapterMatch ? adapterMatch[1].trim() : undefined 
+              return {
+                macAddress: macMatch[1].toUpperCase(),
+                adapterName: adapterMatch ? adapterMatch[1].trim() : undefined
               };
             }
           }
@@ -586,29 +706,29 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
     console.error('Error getting Ethernet MAC address:', error);
     return { macAddress: null };
   }
-  
+
   return { macAddress: null };
 }
 
 /**
- * Get current Wi-Fi information (SSID and optional BSSID)
- * Cross-platform implementation
+ * Get current Wi-Fi information (deprecated - use network.util)
+ * @deprecated Use getCurrentWifi from utils/network.util
  */
-async function getCurrentWifi(): Promise<WifiInfo> {
+async function getCurrentWifiLocal(): Promise<WifiInfo> {
   const platform = process.platform;
-  
+
   try {
     if (platform === 'win32') {
       // Windows: Use netsh wlan show interfaces
       try {
         const { stdout } = await execAsync('netsh wlan show interfaces');
-        
+
         // Split output into lines for easier parsing
         const lines = stdout.split(/\r?\n/);
-        
+
         let ssid: string | null = null;
         let bssid: string | null = null;
-        
+
         // Parse each line to find SSID and BSSID
         for (const line of lines) {
           // SSID format: "    SSID                   : Airtel_C3 wifi"
@@ -625,7 +745,7 @@ async function getCurrentWifi(): Promise<WifiInfo> {
               }
             }
           }
-          
+
           // BSSID format: "    AP BSSID               : 14:33:75:6a:c2:16" (Windows uses "AP BSSID")
           // Also try just "BSSID" as fallback for other formats
           if (/BSSID\s*:/.test(line)) {
@@ -638,7 +758,7 @@ async function getCurrentWifi(): Promise<WifiInfo> {
             }
           }
         }
-        
+
         return {
           ssid,
           bssid,
@@ -655,7 +775,7 @@ async function getCurrentWifi(): Promise<WifiInfo> {
         const { stdout } = await execAsync(`${airportPath} -I`);
         const ssidMatch = stdout.match(/^\s*SSID:\s*(.+)$/m);
         const bssidMatch = stdout.match(/^\s*BSSID:\s*([0-9a-f:]{17})/mi);
-        
+
         return {
           ssid: ssidMatch ? ssidMatch[1].trim() : null,
           bssid: bssidMatch ? bssidMatch[1].trim().toUpperCase() : null,
@@ -664,7 +784,7 @@ async function getCurrentWifi(): Promise<WifiInfo> {
         // Fallback to networksetup (less detailed, no BSSID)
         const { stdout } = await execAsync('networksetup -getairportnetwork en0');
         const ssidMatch = stdout.match(/Current Wi-Fi Network:\s*(.+)/);
-        
+
         return {
           ssid: ssidMatch ? ssidMatch[1].trim() : null,
           bssid: null, // networksetup doesn't provide BSSID
@@ -676,7 +796,7 @@ async function getCurrentWifi(): Promise<WifiInfo> {
         // Try iwgetid (requires root for BSSID, but works for SSID)
         const { stdout } = await execAsync('iwgetid -r');
         const ssid = stdout.trim();
-        
+
         // Try to get BSSID using iwgetid with more options
         let bssid: string | null = null;
         try {
@@ -686,7 +806,7 @@ async function getCurrentWifi(): Promise<WifiInfo> {
         } catch {
           // BSSID not available without root
         }
-        
+
         return {
           ssid: ssid || null,
           bssid,
@@ -709,69 +829,12 @@ async function getCurrentWifi(): Promise<WifiInfo> {
     console.error('Error getting Wi-Fi info:', error);
     return { ssid: null, bssid: null };
   }
-  
+
   return { ssid: null, bssid: null };
 }
 
-/**
- * Get current network information (WiFi or Ethernet)
- * Returns WiFi info if connected via WiFi, Ethernet MAC if connected via Ethernet
- */
-async function getCurrentNetwork(): Promise<NetworkInfo> {
-  console.log('[DEBUG] getCurrentNetwork() called');
-  try {
-    // First, try to get WiFi info
-    console.log('[DEBUG] Step 1: Checking WiFi...');
-    const wifiInfo = await getCurrentWifi();
-    console.log('[DEBUG] WiFi check result:', JSON.stringify(wifiInfo, null, 2));
-    
-    // If WiFi connection found, return WiFi info
-    if (wifiInfo.ssid && wifiInfo.ssid.trim() !== '') {
-      console.log(`[DEBUG] ✓ WiFi detected: ${wifiInfo.ssid}`);
-      return {
-        type: 'wifi',
-        wifi: {
-          ssid: wifiInfo.ssid,
-          bssid: wifiInfo.bssid || null,
-        },
-      };
-    }
-    
-    // No WiFi, try Ethernet
-    console.log('[DEBUG] Step 2: No WiFi found, checking for Ethernet...');
-    const ethernetInfo = await getEthernetMacAddress();
-    console.log('[DEBUG] Ethernet check result:', JSON.stringify(ethernetInfo, null, 2));
-    
-    if (ethernetInfo.macAddress) {
-      console.log(`[DEBUG] ✓ Ethernet detected: ${ethernetInfo.macAddress} (${ethernetInfo.adapterName || 'Unknown adapter'})`);
-      return {
-        type: 'ethernet',
-        ethernet: {
-          macAddress: ethernetInfo.macAddress,
-          adapterName: ethernetInfo.adapterName,
-        },
-      };
-    }
-    
-    // No network connection found
-    console.log('[DEBUG] ✗ No network connection found (WiFi: none, Ethernet: none)');
-    return {
-      type: 'none',
-    };
-  } catch (error: any) {
-    console.error('[DEBUG] ✗ Error in getCurrentNetwork():', error);
-    console.error('[DEBUG] Error stack:', error?.stack);
-    return {
-      type: 'none',
-    };
-  }
-}
-
 // Register IPC handlers for network detection
-interface WifiInfo {
-  ssid: string | null;
-  bssid: string | null;
-}
+// These use the utility functions from network.util.ts
 
 ipcMain.handle('get-current-wifi', async (): Promise<WifiInfo> => {
   return getCurrentWifi();
@@ -790,11 +853,50 @@ ipcMain.handle('open-logs-viewer', async () => {
   return false;
 });
 
+// Auto attendance IPC handlers
+ipcMain.handle('auto-attendance:on-login', async () => {
+  console.log('[AutoAttendance] Received login check-in request');
+  try {
+    const result = await autoAttendanceService.attemptAutoCheckIn('login');
+    console.log(`[AutoAttendance] Login check-in result: ${result.success ? 'SUCCESS' : 'FAILED'} - ${result.reason || 'N/A'}`);
+    return result;
+  } catch (error: any) {
+    console.error('[AutoAttendance] Login check-in failed with error:', error);
+    return {
+      success: false,
+      trigger: 'login',
+      reason: error.message || 'Unknown error',
+      timestamp: new Date(),
+    };
+  }
+});
+
+// Handle auto check-in after auth initialization (when user has saved session)
+ipcMain.handle('auto-attendance:on-auth-init', async () => {
+  console.log('[AutoAttendance] Received auth-init check-in request');
+  try {
+    const result = await autoAttendanceService.attemptAutoCheckIn('app_start');
+    console.log(`[AutoAttendance] Auth-init check-in result: ${result.success ? 'SUCCESS' : 'FAILED'} - ${result.reason || 'N/A'}`);
+    return result;
+  } catch (error: any) {
+    console.error('[AutoAttendance] Auth init check-in failed with error:', error);
+    return {
+      success: false,
+      trigger: 'app_start',
+      reason: error.message || 'Unknown error',
+      timestamp: new Date(),
+    };
+  }
+});
+
 // Handle getting log file path
 ipcMain.handle('get-log-path', async () => {
   const logPath = path.join(app.getPath('logs'), 'main.log');
   return logPath;
 });
+
+// Export getCurrentNetwork for auto-attendance service (re-export from utils)
+export { getCurrentNetwork, NetworkInfo } from './utils/network.util';
 
 // Keep app running in background - don't quit when windows are closed
 app.on('window-all-closed', () => {
@@ -815,11 +917,11 @@ app.on('web-contents-created', (_, contents) => {
   contents.setWindowOpenHandler(() => {
     return { action: 'deny' };
   });
-  
+
   // Prevent navigation to file:// URLs (only allow hash-based routing)
   contents.on('will-navigate', (event, navigationUrl) => {
     const parsedUrl = new URL(navigationUrl);
-    
+
     // Allow navigation within the same origin (file://) but prevent file system navigation
     if (parsedUrl.protocol === 'file:') {
       // Only allow if it's the same file (index.html) with hash changes

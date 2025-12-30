@@ -18,8 +18,9 @@ class AttendanceService {
   /**
    * Check-in
    * For desktop source, automatically includes network information (WiFi or Ethernet) and system fingerprint (REQUIRED)
+   * Returns both the attendance record and the validation message
    */
-  async checkIn(request: CheckInRequest): Promise<AttendanceRecord> {
+  async checkIn(request: CheckInRequest): Promise<{ record: AttendanceRecord; message: string }> {
     // For desktop source, try to get network info (WiFi or Ethernet) if not provided
     if (request.source === AttendanceSource.DESKTOP && !request.wifi && !request.ethernet && window.electronAPI) {
       try {
@@ -66,14 +67,18 @@ class AttendanceService {
     }
 
     const response = await api.post('/attendance/check-in', request);
-    return response.data.data;
+    return {
+      record: response.data.data,
+      message: response.data.message || 'Checked in successfully',
+    };
   }
 
   /**
    * Check-out
    * For desktop source, automatically includes Wi-Fi information and system fingerprint (REQUIRED)
+   * Returns both the attendance record and the validation message
    */
-  async checkOut(request: CheckOutRequest): Promise<AttendanceRecord> {
+  async checkOut(request: CheckOutRequest): Promise<{ record: AttendanceRecord; message: string }> {
     // For desktop source, try to get network info (WiFi or Ethernet) if not provided
     if (request.source === AttendanceSource.DESKTOP && !request.wifi && !request.ethernet && window.electronAPI) {
       try {
@@ -120,7 +125,10 @@ class AttendanceService {
     }
 
     const response = await api.post('/attendance/check-out', request);
-    return response.data.data;
+    return {
+      record: response.data.data,
+      message: response.data.message || 'Checked out successfully',
+    };
   }
 
   /**

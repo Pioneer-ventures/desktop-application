@@ -48,6 +48,15 @@
   padding: 12px 16px;
   border-radius: 8px;
   margin-bottom: 16px;
+}
+
+.attendance-success {
+  background-color: #d1fae5;
+  color: #065f46;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border-left: 4px solid #10b981;
   font-size: 14px;
   line-height: 1.5;
   border-left: 3px solid #dc2626;

@@ -1,12 +1,15 @@
 /**
  * Admin Report Detail Modal Component
  * Modal for viewing full report details
+ * Optimized: Lazy loads react-markdown to reduce initial bundle size
  */
 
-import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { lazy, Suspense } from 'react';
 import { reportService } from '@/services/report.service';
 import './AdminReportDetailModal.css';
+
+// Lazy load react-markdown - only loads when needed (reduces initial bundle by ~100KB)
+const ReactMarkdown = lazy(() => import('react-markdown'));
 
 interface AdminReport {
   id: string;
@@ -125,7 +128,9 @@ export const AdminReportDetailModal: React.FC<AdminReportDetailModalProps> = ({
           <div className="report-content-section">
             <h3>Content</h3>
             <div className="markdown-content">
-              <ReactMarkdown>{report.content}</ReactMarkdown>
+              <Suspense fallback={<div>Loading content...</div>}>
+                <ReactMarkdown>{report.content}</ReactMarkdown>
+              </Suspense>
             </div>
           </div>
 

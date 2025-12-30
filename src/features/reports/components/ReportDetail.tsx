@@ -1,13 +1,16 @@
 /**
  * Report Detail Component
  * Displays full report content with attachments
+ * Optimized: Lazy loads react-markdown to reduce initial bundle size
  */
 
-import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { lazy, Suspense } from 'react';
 import { WorkReport } from '@/types';
 import { reportService } from '@/services/report.service';
 import './ReportDetail.css';
+
+// Lazy load react-markdown - only loads when needed (reduces initial bundle by ~100KB)
+const ReactMarkdown = lazy(() => import('react-markdown'));
 
 interface ReportDetailProps {
   report: WorkReport;
@@ -83,7 +86,9 @@ export const ReportDetail: React.FC<ReportDetailProps> = ({
           <div className="detail-content-section">
             <h2 className="section-title">Content</h2>
             <div className="markdown-content">
-              <ReactMarkdown>{report.content}</ReactMarkdown>
+              <Suspense fallback={<div>Loading content...</div>}>
+                <ReactMarkdown>{report.content}</ReactMarkdown>
+              </Suspense>
             </div>
           </div>
 

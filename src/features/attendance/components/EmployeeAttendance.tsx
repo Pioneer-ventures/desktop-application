@@ -27,6 +27,7 @@ export const EmployeeAttendance: React.FC = () => {
   const [status, setStatus] = useState<AttendanceStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null);
   const [networkValidation, setNetworkValidation] = useState<NetworkValidationState>({
     isValid: null,
@@ -82,14 +83,14 @@ export const EmployeeAttendance: React.FC = () => {
     // Prevent duplicate simultaneous checks
     if (isCheckingWifi.current || !window.electronAPI) {
       if (!window.electronAPI) {
-        console.log('[Frontend DEBUG] No electronAPI available, skipping network check');
+         
       } else {
-        console.log('[Frontend DEBUG] Network check already in progress, skipping');
+         
       }
       return;
     }
 
-    console.log('[Frontend DEBUG] Starting network check...');
+     
     isCheckingWifi.current = true;
     setNetworkValidation((prev) => ({ ...prev, loading: true }));
 
@@ -100,7 +101,7 @@ export const EmployeeAttendance: React.FC = () => {
       console.log('[Frontend DEBUG] getCurrentNetwork() returned:', JSON.stringify(networkInfo, null, 2));
 
       if (networkInfo.type === 'none') {
-        console.log('[Frontend DEBUG] Network type is "none", showing error');
+         
         setNetworkValidation({
           isValid: false,
           networkInfo: null,
@@ -111,28 +112,28 @@ export const EmployeeAttendance: React.FC = () => {
         return;
       }
 
-      console.log(`[Frontend DEBUG] Network type: ${networkInfo.type}`);
+       
       if (networkInfo.type === 'wifi') {
-        console.log(`[Frontend DEBUG] WiFi info:`, networkInfo.wifi);
+         
       } else if (networkInfo.type === 'ethernet') {
-        console.log(`[Frontend DEBUG] Ethernet info:`, networkInfo.ethernet);
+         
       }
 
       // Validate network with backend (WiFi or Ethernet)
-      console.log('[Frontend DEBUG] Validating network with backend...');
+       
       let validation;
       if (networkInfo.type === 'wifi' && networkInfo.wifi) {
         const validationRequest = {
           ssid: networkInfo.wifi.ssid,
           bssid: networkInfo.wifi.bssid || undefined,
         };
-        console.log('[Frontend DEBUG] WiFi validation request:', validationRequest);
+         
         validation = await wifiService.validateNetwork(validationRequest);
       } else if (networkInfo.type === 'ethernet' && networkInfo.ethernet) {
         const validationRequest = {
           macAddress: networkInfo.ethernet.macAddress,
         };
-        console.log('[Frontend DEBUG] Ethernet validation request:', validationRequest);
+         
         validation = await wifiService.validateNetwork(validationRequest);
       } else {
         console.error('[Frontend DEBUG] Invalid network information structure');
@@ -153,7 +154,7 @@ export const EmployeeAttendance: React.FC = () => {
         reason: validation.reason,
         loading: false,
       });
-      console.log('[Frontend DEBUG] Network validation complete. isValid:', validation.allowed);
+       
     } catch (err: any) {
       console.error('[Frontend DEBUG] ✗ Error checking network status:', err);
       console.error('[Frontend DEBUG] Error details:', {
@@ -219,9 +220,16 @@ export const EmployeeAttendance: React.FC = () => {
         }
       }
 
-      const record = await attendanceService.checkIn(checkInRequest);
-      setTodayRecord(record);
+      const result = await attendanceService.checkIn(checkInRequest);
+      setTodayRecord(result.record);
+      setSuccessMessage(result.message);
+      setError(null); // Clear any previous errors
       await loadStatus();
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 5000);
     } catch (err: any) {
       // Extract user-friendly error message from API response
       const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to check in. Please try again.';
@@ -264,9 +272,16 @@ export const EmployeeAttendance: React.FC = () => {
         }
       }
 
-      const record = await attendanceService.checkOut(checkOutRequest);
-      setTodayRecord(record);
+      const result = await attendanceService.checkOut(checkOutRequest);
+      setTodayRecord(result.record);
+      setSuccessMessage(result.message);
+      setError(null); // Clear any previous errors
       await loadStatus();
+      
+      // Clear success message after 5 seconds
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 5000);
     } catch (err: any) {
       // Extract user-friendly error message from API response
       const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to check out. Please try again.';
@@ -333,6 +348,7 @@ export const EmployeeAttendance: React.FC = () => {
       </div>
 
       {error && <div className="attendance-error">{error}</div>}
+      {successMessage && <div className="attendance-success">{successMessage}</div>}
 
       {/* Network Status Section - Only show in desktop app */}
       {window.electronAPI && (

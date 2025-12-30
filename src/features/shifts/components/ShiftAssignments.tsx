@@ -171,8 +171,13 @@ export const ShiftAssignments: React.FC = () => {
           assignmentRequest.shiftId = formData.shiftId;
         }
 
-        await shiftService.createAssignment(assignmentRequest);
-        setSuccess('Assignment created successfully');
+        const result = await shiftService.createAssignment(assignmentRequest);
+        // Check for warnings
+        if ((result as any).warning) {
+          setSuccess(`Assignment created successfully. ${(result as any).warning}`);
+        } else {
+          setSuccess('Assignment created successfully');
+        }
       }
 
       setShowForm(false);
