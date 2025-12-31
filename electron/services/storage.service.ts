@@ -11,6 +11,8 @@ import * as path from 'path';
 interface AutoAttendanceStorage {
   lastCheckInAttemptTimestamp?: string;
   lastCheckInSessionId?: string;
+  lastCheckOutAttemptTimestamp?: string;
+  lastCheckOutSessionId?: string;
   lastNetworkUsed?: {
     type: 'wifi' | 'ethernet';
     ssid?: string;
@@ -18,12 +20,28 @@ interface AutoAttendanceStorage {
     macAddress?: string;
   };
   lastTriggerAttempts?: Record<string, string>; // timestamp per trigger
+  sessionState?: {
+    lastCheckInTimestamp?: string;
+    lastCheckOutTimestamp?: string;
+    lastNetworkInfo?: {
+      type: 'wifi' | 'ethernet';
+      ssid?: string;
+      bssid?: string;
+      macAddress?: string;
+    };
+    systemFingerprint?: string;
+    sessionEndTimestamp?: string;
+    pendingCheckout?: boolean;
+  };
 }
 
 interface AutoAttendanceConfig {
   autoCheckInEnabled: boolean;
   autoStartEnabled: boolean;
   showNotifications: boolean;
+  autoCheckoutOnShutdownEnabled?: boolean;
+  checkoutTimeout?: number;
+  checkoutNotificationsEnabled?: boolean;
 }
 
 const STORAGE_FILE = 'auto-attendance-storage.json';
@@ -230,6 +248,111 @@ class StorageService {
     const current = this.readConfig();
     const updated = { ...current, ...updates };
     this.writeConfig(updated);
+  }
+
+  /**
+   * Set last check-out attempt timestamp
+   */
+  setLastCheckOutAttempt(timestamp: Date, sessionId?: string): void {
+    this.updateStorage({
+      lastCheckOutAttemptTimestamp: timestamp.toISOString(),
+      lastCheckOutSessionId: sessionId,
+    });
+  }
+
+  /**
+   * Get last check-out attempt timestamp
+   */
+  getLastCheckOutAttempt(): Date | null {
+    const storage = this.readStorage();
+    if (!storage.lastCheckOutAttemptTimestamp) {
+      return null;
+    }
+    return new Date(storage.lastCheckOutAttemptTimestamp);
+  }
+
+  /**
+   * Save session state
+   */
+  saveSessionState(state: {
+    lastCheckInTimestamp?: Date;
+    lastCheckOutTimestamp?: Date;
+    lastNetworkInfo?: {
+      type: 'wifi' | 'ethernet';
+      ssid?: string;
+      bssid?: string;
+      macAddress?: string;
+    };
+    systemFingerprint?: string;
+    sessionEndTimestamp?: Date;
+    pendingCheckout?: boolean;
+  }): void {
+    const storage = this.readStorage();
+    const sessionState = {
+      ...storage.sessionState,
+      ...(state.lastCheckInTimestamp && { lastCheckInTimestamp: state.lastCheckInTimestamp.toISOString() }),
+      ...(state.lastCheckOutTimestamp && { lastCheckOutTimestamp: state.lastCheckOutTimestamp.toISOString() }),
+      ...(state.lastNetworkInfo && { lastNetworkInfo: state.lastNetworkInfo }),
+      ...(state.systemFingerprint && { systemFingerprint: state.systemFingerprint }),
+      ...(state.sessionEndTimestamp && { sessionEndTimestamp: state.sessionEndTimestamp.toISOString() }),
+      ...(state.pendingCheckout !== undefined && { pendingCheckout: state.pendingCheckout }),
+    };
+
+    this.updateStorage({ sessionState });
+  }
+
+  /**
+   * Get last session state
+   */
+  getLastSessionState(): {
+    lastCheckInTimestamp?: Date;
+    lastCheckOutTimestamp?: Date;
+    lastNetworkInfo?: {
+      type: 'wifi' | 'ethernet';
+      ssid?: string;
+      bssid?: string;
+      macAddress?: string;
+    };
+    systemFingerprint?: string;
+    sessionEndTimestamp?: Date;
+    pendingCheckout?: boolean;
+  } | null {
+    const storage = this.readStorage();
+    if (!storage.sessionState) {
+      return null;
+    }
+
+    const state = storage.sessionState;
+    return {
+      ...(state.lastCheckInTimestamp && { lastCheckInTimestamp: new Date(state.lastCheckInTimestamp) }),
+      ...(state.lastCheckOutTimestamp && { lastCheckOutTimestamp: new Date(state.lastCheckOutTimestamp) }),
+      ...(state.lastNetworkInfo && { lastNetworkInfo: state.lastNetworkInfo }),
+      ...(state.systemFingerprint && { systemFingerprint: state.systemFingerprint }),
+      ...(state.sessionEndTimestamp && { sessionEndTimestamp: new Date(state.sessionEndTimestamp) }),
+      ...(state.pendingCheckout !== undefined && { pendingCheckout: state.pendingCheckout }),
+    };
+  }
+
+  /**
+   * Mark session end timestamp
+   */
+  markSessionEnd(timestamp: Date = new Date()): void {
+    const storage = this.readStorage();
+    const sessionState = {
+      ...storage.sessionState,
+      sessionEndTimestamp: timestamp.toISOString(),
+    };
+    this.updateStorage({ sessionState });
+  }
+
+  /**
+   * Clear session state
+   */
+  clearSessionState(): void {
+    const storage = this.readStorage();
+    const updated = { ...storage };
+    delete updated.sessionState;
+    this.writeStorage(updated);
   }
 
   /**

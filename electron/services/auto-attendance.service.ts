@@ -165,7 +165,7 @@ class AutoAttendanceService {
    * Execute check-in
    */
   async executeCheckIn(trigger: AutoCheckInTrigger, networkInfo: NetworkInfo): Promise<AttendanceRecord> {
- 
+    console.log(`[AutoAttendanceService] Executing check-in for trigger: ${trigger}`);
     
     const checkInRequest: CheckInRequest = {
       source: 'desktop',
@@ -177,12 +177,12 @@ class AutoAttendanceService {
         ssid: networkInfo.wifi.ssid,
         bssid: networkInfo.wifi.bssid || undefined,
       };
- 
+      console.log(`[AutoAttendanceService] Adding WiFi info - SSID: ${networkInfo.wifi.ssid}`);
     } else if (networkInfo.type === 'ethernet' && networkInfo.ethernet) {
       checkInRequest.ethernet = {
         macAddress: networkInfo.ethernet.macAddress,
       };
- 
+      console.log(`[AutoAttendanceService] Adding Ethernet info - MAC: ${networkInfo.ethernet.macAddress}`);
     }
 
     // Add system fingerprint (required for desktop)
@@ -207,14 +207,14 @@ class AutoAttendanceService {
     try {
       console.log('[AutoAttendanceService] Calling check-in API...');
       const attendance = await apiService.checkIn(checkInRequest);
- 
+      console.log(`[AutoAttendanceService] Check-in successful! Attendance ID: ${attendance.id}`);
       return attendance;
     } catch (error: any) {
       // Log the error with more context
       const errorMessage = error.message || error.response?.data?.error || 'Unknown error';
       const statusCode = error.statusCode || error.response?.status || 500;
       
- 
+      console.error(`[AutoAttendanceService] Check-in API call failed:`, {
         statusCode,
         errorMessage,
         networkType: networkInfo.type,
@@ -252,7 +252,7 @@ class AutoAttendanceService {
     // Skip if last attempt was within debounce period (5 minutes)
     // This prevents spam from rapid triggers, but actual check-in status is checked via API
     if (timeSinceLastAttempt < DEBOUNCE_PERIOD_MS) {
- 
+      console.log(`[AutoAttendanceService] Skipping due to debounce (last attempt ${Math.round(timeSinceLastAttempt / 1000)}s ago)`);
       return true;
     }
 
@@ -263,7 +263,7 @@ class AutoAttendanceService {
    * Attempt auto check-in
    */
   async attemptAutoCheckIn(trigger: AutoCheckInTrigger): Promise<AutoCheckInResult> {
- 
+    console.log(`[AutoAttendanceService] Attempting auto check-in - trigger: ${trigger}`);
     
     const result: AutoCheckInResult = {
       success: false,
@@ -276,7 +276,7 @@ class AutoAttendanceService {
       // Note: We only store trigger attempt timestamp on SUCCESS, so failed attempts allow retries
       if (this.shouldSkipAttempt(trigger)) {
         result.reason = 'Skipped due to debouncing (recent successful attempt within 30 seconds)';
- 
+        console.log(`[AutoAttendanceService] Check-in skipped: ${result.reason}`);
         loggerService.logAttempt(trigger, 'skipped', result.reason);
         return result;
       }
@@ -284,11 +284,11 @@ class AutoAttendanceService {
       // Get current network
       console.log('[AutoAttendanceService] Getting current network info...');
       const networkInfo = await getCurrentNetwork();
- 
+      console.log(`[AutoAttendanceService] Network type: ${networkInfo.type}`);
       
       if (networkInfo.type === 'none') {
         result.reason = 'No network connection';
- 
+        console.log(`[AutoAttendanceService] Check-in failed: ${result.reason}`);
         loggerService.logAttempt(trigger, 'failed', result.reason);
         return result;
       }
@@ -298,7 +298,7 @@ class AutoAttendanceService {
       const eligibility = await this.preCheckEligibility(networkInfo);
       if (!eligibility.eligible) {
         result.reason = eligibility.reason || 'Eligibility check failed';
- 
+        console.log(`[AutoAttendanceService] Eligibility check failed: ${result.reason}`);
         loggerService.logAttempt(trigger, 'failed', result.reason, { eligibility });
         // Don't update trigger attempt timestamp on failure - allows retries
         return result;
@@ -319,14 +319,29 @@ class AutoAttendanceService {
       storageService.setLastTriggerAttempt(trigger, new Date());
 
       // Store network info
+      const networkInfoToStore = {
+        type: networkInfo.type,
+        ssid: networkInfo.wifi?.ssid,
+        bssid: networkInfo.wifi?.bssid || undefined, // Convert null to undefined
+        macAddress: networkInfo.ethernet?.macAddress,
+      };
+      
       storageService.updateStorage({
-        lastNetworkUsed: {
-          type: networkInfo.type,
-          ssid: networkInfo.wifi?.ssid,
-          bssid: networkInfo.wifi?.bssid || undefined, // Convert null to undefined
-          macAddress: networkInfo.ethernet?.macAddress,
-        },
+        lastNetworkUsed: networkInfoToStore,
       });
+
+      // Store session state for check-out recovery
+      try {
+        const fingerprint = await getSystemFingerprint();
+        storageService.saveSessionState({
+          lastCheckInTimestamp: new Date(),
+          lastNetworkInfo: networkInfoToStore,
+          systemFingerprint: fingerprint || undefined,
+          pendingCheckout: false,
+        });
+      } catch (error) {
+        console.error('[AutoAttendanceService] Failed to save session state:', error);
+      }
 
       // Log success
       loggerService.logAttempt(trigger, 'success', undefined, {

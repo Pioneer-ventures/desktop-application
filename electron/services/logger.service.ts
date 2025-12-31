@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Local type definitions
-type AutoCheckInTrigger = 'app_start' | 'login' | 'network_change' | 'system_wake';
+type AutoCheckInTrigger = 'app_start' | 'login' | 'network_change' | 'system_wake' | 'checkout_shutdown' | 'checkout_logout' | 'checkout_recovery' | 'checkout_background';
 
 const LOG_FILE = 'auto-attendance.log';
 const MAX_LOG_AGE_DAYS = 7;

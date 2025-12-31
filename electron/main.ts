@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain, powerMonitor } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, dialog, ipcMain, powerMonitor, powerSaveBlocker } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -6,36 +6,16 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as os from 'os';
 
-// Network utilities (lightweight, load immediately)
+// Auto attendance services
+import { autoAttendanceService } from './services/auto-attendance.service';
+import { autoCheckOutService } from './services/auto-checkout.service';
+import { sessionService } from './services/session.service';
+import { configService } from './services/config.service';
+import { storageService } from './services/storage.service';
+import { apiService } from './services/api.service';
+
+// Network utilities
 import { getCurrentNetwork, getCurrentWifi, NetworkInfo, WifiInfo } from './utils/network.util';
-
-// CRITICAL: Lazy load heavy services - don't import at top level
-// This dramatically speeds up startup time (270MB app loads instantly)
-let autoAttendanceService: any = null;
-let sessionService: any = null;
-let configService: any = null;
-
-// Lazy service loaders
-function getConfigService() {
-  if (!configService) {
-    configService = require('./services/config.service').configService;
-  }
-  return configService;
-}
-
-function getSessionService() {
-  if (!sessionService) {
-    sessionService = require('./services/session.service').sessionService;
-  }
-  return sessionService;
-}
-
-function getAutoAttendanceService() {
-  if (!autoAttendanceService) {
-    autoAttendanceService = require('./services/auto-attendance.service').autoAttendanceService;
-  }
-  return autoAttendanceService;
-}
 
 const execAsync = promisify(exec);
 // Keep a global reference of the window object
@@ -43,12 +23,6 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-const shouldStartHidden = process.argv.includes('--hidden');
-
-// OPTIMIZATION: Performance flags for faster startup
-app.commandLine.appendSwitch('--disable-renderer-backgrounding');
-app.commandLine.appendSwitch('--disable-background-timer-throttling');
-app.commandLine.appendSwitch('--disable-backgrounding-occluded-windows');
 
 // Suppress Electron/Chromium cache errors on Windows
 // These are harmless permission warnings that can be safely ignored
@@ -100,213 +74,124 @@ function getIconPath(): string | undefined {
   return undefined;
 }
 
-/**
- * STAGE 2: Create window only when user needs it
- * This is called on-demand when user clicks tray icon
- * Uses progressive loading: instant loading screen → actual app
- */
-function createWindow(): BrowserWindow {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    return mainWindow;
-  }
-
+function createWindow(): void {
   const iconPath = getIconPath();
 
-  // Create window but don't show yet - we'll show after content loads
+  // Create the browser window
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    show: false, // Don't show until ready - prevents white flash
-    backgroundColor: '#ffffff', // Match your app theme
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      webSecurity: true,
-      devTools: isDev,
-      backgroundThrottling: false, // Critical: keep responsive in background
-      spellcheck: false, // Save memory
+      webSecurity: true, // Keep security enabled
+      devTools: isDev, // Only allow DevTools in development
     },
     titleBarStyle: 'default',
-    autoHideMenuBar: true,
-    icon: iconPath,
+    autoHideMenuBar: true, // Hide the menu bar
+    icon: iconPath, // Set window icon
   });
 
+  // Remove the menu bar completely
   Menu.setApplicationMenu(null);
 
-  // Load instant loading screen first (data URI - no file I/O)
-  mainWindow.loadURL(`data:text/html,${encodeURIComponent(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <style>
-        body {
-          margin: 0;
-          padding: 0;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          height: 100vh;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-        }
-        .loader {
-          text-align: center;
-        }
-        .spinner {
-          border: 4px solid rgba(255,255,255,0.3);
-          border-top: 4px solid white;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-          margin: 0 auto 20px;
-        }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        h2 { margin: 0; font-weight: 300; }
-      </style>
-    </head>
-    <body>
-      <div class="loader">
-        <div class="spinner"></div>
-        <h2>Loading HRMS Desktop...</h2>
-      </div>
-    </body>
-    </html>
-  `)}`);
-
-  // Show window immediately with loading screen (user sees instant feedback)
-  mainWindow.show();
-
-  // Now load the actual app (happens in background)
-  const loadActualApp = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-
-    if (isDev) {
-      mainWindow.loadURL('http://localhost:5173');
-    } else {
-      const possiblePaths = [
-        path.join(__dirname, '../dist/index.html'),
-        path.join(__dirname, '../../dist/index.html'),
-        path.join(process.resourcesPath, 'app/dist/index.html'),
-        path.join(app.getAppPath(), 'dist/index.html'),
-      ];
-
-      let loaded = false;
-      for (const htmlPath of possiblePaths) {
-        if (fs.existsSync(htmlPath)) {
-          const normalizedPath = htmlPath.replace(/\\/g, '/');
-          const fileUrl = `file:///${normalizedPath}`;
-          mainWindow.loadURL(fileUrl);
-          loaded = true;
-          break;
-        }
-      }
-
-      if (!loaded) {
-        mainWindow.loadURL(`data:text/html,${encodeURIComponent(`
-          <html>
-            <head><title>Error</title></head>
-            <body style="font-family: Arial; padding: 40px; text-align: center;">
-              <h1>Application Error</h1>
-              <p>Could not load the application files.</p>
-              <p>Please reinstall the application.</p>
-            </body>
-          </html>
-        `)}`);
-      }
-
-      mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-        if (errorCode !== -3) {
-          console.error('Failed to load page:', errorDescription);
-        }
-      });
-    }
-  };
-
-  // Load actual app after a tiny delay (makes loading screen visible)
-  setTimeout(loadActualApp, 100);
-
+  // Load the app
   if (isDev) {
-    mainWindow.webContents.once('did-finish-load', () => {
-      mainWindow?.webContents.openDevTools();
+    mainWindow.loadURL('http://localhost:5173');
+  } else {
+    // In production, use loadURL with proper file:// path format
+    const possiblePaths = [
+      path.join(__dirname, '../dist/index.html'),
+      path.join(__dirname, '../../dist/index.html'),
+      path.join(process.resourcesPath, 'app/dist/index.html'),
+      path.join(app.getAppPath(), 'dist/index.html'),
+    ];
+
+    let loaded = false;
+    for (const htmlPath of possiblePaths) {
+      if (fs.existsSync(htmlPath)) {
+        // Convert to proper file:// URL format for Windows
+        // C:\path\to\file -> file:///C:/path/to/file
+        const normalizedPath = htmlPath.replace(/\\/g, '/');
+        const fileUrl = `file:///${normalizedPath}`;
+
+        mainWindow.loadURL(fileUrl);
+        loaded = true;
+        break;
+      }
+    }
+
+    if (!loaded) {
+      // Show user-friendly error message
+      mainWindow.loadURL(`data:text/html,${encodeURIComponent(`
+        <html>
+          <head><title>Error</title></head>
+          <body style="font-family: Arial; padding: 40px; text-align: center;">
+            <h1>Application Error</h1>
+            <p>Could not load the application files.</p>
+            <p>Please reinstall the application.</p>
+          </body>
+        </html>
+      `)}`);
+    }
+
+    // Handle errors silently in production
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      // Only log critical errors
+      if (errorCode !== -3) { // -3 is ERR_ABORTED, which is normal for some navigations
+        console.error('Failed to load page:', errorDescription);
+      }
     });
   }
 
+  // Open DevTools on startup only in development
+  if (isDev) {
+  mainWindow.webContents.openDevTools();
+  }
+
+  // Handle window close - hide to tray instead of closing
   mainWindow.on('close', (event) => {
-    if (!appIsQuitting) {
+    if (!appIsQuitting && !isCheckingOut) {
       event.preventDefault();
       mainWindow?.hide();
     }
   });
 
+  // Set main window reference in session service for IPC communication
+  sessionService.setMainWindow(mainWindow);
+
+  // Emitted when the window is actually closed
   mainWindow.on('closed', () => {
-    getSessionService().setMainWindow(null);
+    sessionService.setMainWindow(null);
     mainWindow = null;
-    windowCreated = false;
   });
-
-  // Initialize services now that window exists
-  initializeServices();
-
-  return mainWindow;
 }
 
-/**
- * Initialize heavy services only when needed
- */
-function initializeServices(): void {
-  if (servicesInitialized) return;
-  servicesInitialized = true;
-
-  console.log('[Main] Initializing services (lazy load)...');
-
-  const sessionSvc = getSessionService();
-  sessionSvc.setMainWindow(mainWindow);
-
-  // Defer auto-attendance setup (happens in background)
-  setTimeout(() => {
-    setupAutoAttendance();
-  }, 1000);
-
-  // Defer auto-updater (not critical for startup)
-  setTimeout(() => {
-    setupAutoUpdater();
-  }, 5000);
-}
-
-/**
- * STAGE 1: Create ultra-lightweight tray (instant)
- * This appears immediately - no window, no React, no heavy services
- */
+// Create system tray
 function createTray(): void {
   const iconPath = getIconPath();
+
   if (!iconPath) {
-    console.error('Icon not found, using default');
-    return;
+    return; // Can't create tray without icon
   }
 
-  const icon = nativeImage.createFromPath(iconPath);
-  tray = new Tray(icon);
+  // Create tray icon
+  const trayIcon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(trayIcon.resize({ width: 16, height: 16 }));
 
+  // Create context menu
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open HRMS Desktop',
+      label: 'Show HRMS Desktop',
       click: () => {
-        if (!windowCreated || !mainWindow || mainWindow.isDestroyed()) {
-          createWindow();
-          windowCreated = true;
-        } else {
-          if (mainWindow.isMinimized()) mainWindow.restore();
+        if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
+        } else {
+          createWindow();
         }
       },
     },
@@ -316,18 +201,19 @@ function createTray(): void {
     {
       label: 'View System Logs',
       click: () => {
-        if (!windowCreated || !mainWindow || mainWindow.isDestroyed()) {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+          // Send IPC message to open logs viewer
+          mainWindow.webContents.send('open-logs-viewer');
+        } else {
           createWindow();
-          windowCreated = true;
+          // Wait for window to load, then send message
           setTimeout(() => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow) {
               mainWindow.webContents.send('open-logs-viewer');
             }
           }, 1000);
-        } else {
-          mainWindow.show();
-          mainWindow.focus();
-          mainWindow.webContents.send('open-logs-viewer');
         }
       },
     },
@@ -346,35 +232,31 @@ function createTray(): void {
   tray.setToolTip('HRMS Desktop');
   tray.setContextMenu(contextMenu);
 
-  // Single click to open (Windows)
+  // Double-click to show window
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+
+  // Single click to toggle (Windows)
   if (process.platform === 'win32') {
     tray.on('click', () => {
-      if (!windowCreated || !mainWindow || mainWindow.isDestroyed()) {
-        createWindow();
-        windowCreated = true;
-      } else {
+      if (mainWindow) {
         if (mainWindow.isVisible()) {
           mainWindow.hide();
         } else {
-          if (mainWindow.isMinimized()) mainWindow.restore();
           mainWindow.show();
           mainWindow.focus();
         }
+      } else {
+        createWindow();
       }
     });
   }
-
-  // Double-click to show window (macOS/Linux)
-  tray.on('double-click', () => {
-    if (!windowCreated || !mainWindow || mainWindow.isDestroyed()) {
-      createWindow();
-      windowCreated = true;
-    } else {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
 }
 
 // Disable hardware acceleration if causing issues (uncomment if needed)
@@ -382,42 +264,46 @@ function createTray(): void {
 
 // Prevent app from quitting when all windows are closed
 let appIsQuitting = false;
-let windowCreated = false;
-let servicesInitialized = false;
+let isCheckingOut = false;
+let shutdownEventPrevented = false;
+let sleepBlockerId: number | null = null;
 
 // Setup auto-start configuration
 function setupAutoStart(): void {
   try {
-    const configSvc = getConfigService();
-    const autoStartEnabled = configSvc.isAutoStartEnabled();
+    const autoStartEnabled = configService.isAutoStartEnabled();
 
     app.setLoginItemSettings({
       openAtLogin: autoStartEnabled,
       openAsHidden: true, // Start minimized to tray
       name: 'HRMS Desktop',
-      args: ['--hidden'], // Hidden flag for startup (ultra-fast tray-only mode)
+      args: ['--hidden'], // Hidden flag for startup
     });
   } catch (error) {
     console.error('[AutoStart] Failed to configure auto-start:', error);
   }
 }
 
-// Setup auto attendance system (deferred/lazy)
+// Setup auto attendance system
 function setupAutoAttendance(): void {
-  const autoAttendSvc = getAutoAttendanceService();
+  // Note: App start auto check-in is now handled via IPC after auth initialization
+  // This is triggered from the renderer process after initializeAuth completes
+  // This ensures the window is ready and auth state is properly loaded
 
-  // System wake detection
+  // 2. System wake detection
   if (powerMonitor) {
     powerMonitor.on('resume', () => {
+
+      // Wait 5 seconds for network to reconnect
       setTimeout(() => {
-        autoAttendSvc.attemptAutoCheckIn('system_wake').catch((error: any) => {
+        autoAttendanceService.attemptAutoCheckIn('system_wake').catch((error) => {
           console.error('[AutoAttendance] System wake check-in failed:', error);
         });
       }, 5000);
     });
   }
 
-  // Network change detection - deferred and lightweight
+  // 3. Network change detection (polling)
   let lastNetworkState: string | null = null;
   let networkChangeDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -432,11 +318,15 @@ function setupAutoAttendance(): void {
       });
 
       if (lastNetworkState !== null && lastNetworkState !== currentState) {
+
+
+        // Debounce network change (wait 3 seconds for connection to stabilize)
         if (networkChangeDebounceTimer) {
           clearTimeout(networkChangeDebounceTimer);
         }
+
         networkChangeDebounceTimer = setTimeout(() => {
-          autoAttendSvc.attemptAutoCheckIn('network_change').catch((error: any) => {
+          autoAttendanceService.attemptAutoCheckIn('network_change').catch((error) => {
             console.error('[AutoAttendance] Network change check-in failed:', error);
           });
         }, 3000);
@@ -448,29 +338,648 @@ function setupAutoAttendance(): void {
     }
   };
 
-  // Start polling after delay (not blocking startup)
-  setTimeout(() => {
-    checkNetworkChange();
-    setInterval(checkNetworkChange, 10000); // Poll every 10 seconds
-  }, 5000);
+  // Poll network every 5 seconds
+  setInterval(checkNetworkChange, 5000);
+
+  // Initial network state check
+  checkNetworkChange();
 }
 
-// Configure auto-updater (deferred/lazy)
+// Setup auto check-out on shutdown/logout
+function setupAutoCheckout(): void {
+  // Check for recovery on app start
+  checkRecoveryCheckout();
+
+  // Setup shutdown/logout/sleep detection
+  if (powerMonitor) {
+    // Windows shutdown detection
+    if (process.platform === 'win32') {
+      powerMonitor.on('shutdown', async () => {
+        console.log('[AutoCheckout] System shutdown detected');
+        await handleShutdownEvent({}, 'shutdown');
+      });
+    }
+
+    // System sleep/suspend detection (works on all platforms)
+    powerMonitor.on('suspend', async () => {
+      console.log('[AutoCheckout] System sleep/suspend detected');
+      // Note: We can't prevent sleep, but we can attempt check-out quickly
+      await handleSleepEvent();
+    });
+
+    // System lock detection (Windows/macOS)
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      powerMonitor.on('lock-screen', async () => {
+        console.log('[AutoCheckout] Screen lock detected');
+        // Handle lock screen - show dialog asking if user wants to check out
+        await handleShutdownEvent({}, 'logout');
+      });
+    }
+  }
+
+  // Handle app termination (may indicate logout)
+  app.on('before-quit', async (event) => {
+    if (!appIsQuitting && !isCheckingOut) {
+      console.log('[AutoCheckout] App quit detected (possible logout)');
+      await handleShutdownEvent(event, 'logout');
+    }
+  });
+
+  // Handle window close (may indicate logout on some systems)
+  app.on('will-quit', async (event) => {
+    if (!appIsQuitting && !isCheckingOut && !shutdownEventPrevented) {
+      console.log('[AutoCheckout] Will quit event detected');
+      await handleShutdownEvent(event, 'logout');
+    }
+  });
+}
+
+// Handle sleep event - BLOCK sleep until user responds
+async function handleSleepEvent(): Promise<void> {
+  // Check if feature is enabled
+  if (!configService.isAutoCheckoutOnShutdownEnabled()) {
+    console.log('[AutoCheckout] Auto check-out on sleep is disabled');
+    return;
+  }
+
+  // Check if already checking out
+  if (isCheckingOut) {
+    console.log('[AutoCheckout] Check-out already in progress');
+    return;
+  }
+
+  // BLOCK SLEEP - Start power save blocker to prevent system from sleeping
+  try {
+    sleepBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    console.log('[AutoCheckout] Sleep blocked - waiting for user response');
+  } catch (error) {
+    console.error('[AutoCheckout] Failed to block sleep:', error);
+  }
+
+  // Check authentication
+  const isAuthenticated = await sessionService.isAuthenticated();
+  if (!isAuthenticated) {
+    console.log('[AutoCheckout] User not authenticated, skipping check-out');
+    stopSleepBlocker();
+    return;
+  }
+
+  // Check attendance status
+  try {
+    const status = await apiService.getAttendanceStatus();
+    
+    if (status.status === 'NOT_STARTED') {
+      console.log('[AutoCheckout] User not checked in, skipping check-out');
+      stopSleepBlocker();
+      return;
+    }
+
+    if (status.status === 'CHECKED_OUT') {
+      console.log('[AutoCheckout] User already checked out, skipping check-out');
+      stopSleepBlocker();
+      return;
+    }
+
+    // User is checked in - show dialog (sleep is blocked, so dialog will be visible)
+    await showCheckoutDialogForSleep();
+  } catch (error: any) {
+    console.error('[AutoCheckout] Failed to check attendance status during sleep:', error);
+    stopSleepBlocker();
+  }
+}
+
+// Stop sleep blocker
+function stopSleepBlocker(): void {
+  if (sleepBlockerId !== null) {
+    try {
+      powerSaveBlocker.stop(sleepBlockerId);
+      sleepBlockerId = null;
+      console.log('[AutoCheckout] Sleep blocker stopped');
+    } catch (error) {
+      console.error('[AutoCheckout] Failed to stop sleep blocker:', error);
+    }
+  }
+}
+
+// Show check-out dialog for sleep (sleep is BLOCKED, so dialog will be visible)
+async function showCheckoutDialogForSleep(): Promise<void> {
+  // Ensure window is visible and focused
+  if (mainWindow) {
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+    mainWindow.moveTop(); // Bring to front
+  }
+
+  try {
+    const dialogOptions: Electron.MessageBoxOptions = {
+      type: 'question',
+      title: 'Check Out',
+      message: 'Are you checking out...?',
+      detail: 'Your system is trying to sleep. Would you like to check out before sleeping?',
+      buttons: ['Check Out', 'Continue'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    };
+    
+    // Show dialog - sleep is blocked, so this will be visible and block until user responds
+    const dialogResult = mainWindow
+      ? await dialog.showMessageBox(mainWindow, dialogOptions)
+      : await dialog.showMessageBox(dialogOptions);
+
+    if (dialogResult.response === 0) {
+      // User selected "Check Out"
+      await performCheckoutOnSleep();
+    } else {
+      // User selected "Continue" - save timestamp and allow sleep
+      console.log('[AutoCheckout] User chose to continue without check-out');
+      
+      // Save timestamp when user closes without checking out
+      const sessionState = storageService.getLastSessionState();
+      storageService.saveSessionState({
+        ...sessionState,
+        pendingCheckout: true,
+        sessionEndTimestamp: new Date(),
+      });
+      storageService.markSessionEnd(new Date());
+      
+      stopSleepBlocker();
+    }
+  } catch (error) {
+    console.error('[AutoCheckout] Dialog error during sleep:', error);
+    // On error, stop blocker and allow sleep
+    stopSleepBlocker();
+  }
+}
+
+// Perform check-out on sleep (sleep is still blocked until this completes)
+async function performCheckoutOnSleep(): Promise<void> {
+  isCheckingOut = true;
+  const timeout = configService.getCheckoutTimeout() * 1000; // Use configured timeout
+
+  try {
+    console.log('[AutoCheckout] Attempting check-out (sleep is blocked)');
+
+    // Create timeout promise
+    const timeoutPromise = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        console.warn('[AutoCheckout] Check-out timeout');
+        resolve();
+      }, timeout);
+    });
+
+    // Create check-out promise (use fast mode for sleep)
+    const checkoutPromise = autoCheckOutService.attemptCheckout('shutdown', true);
+
+    // Race between check-out and timeout
+    const result = await Promise.race([
+      checkoutPromise.then(() => ({ success: true })),
+      timeoutPromise.then(() => ({ success: false, reason: 'Timeout' })),
+    ]);
+
+    if (result.success) {
+      const checkoutResult = await checkoutPromise;
+      if (checkoutResult.success) {
+        console.log('[AutoCheckout] Check-out successful');
+        // Clear pending checkout state (check-out completed successfully)
+        const sessionState = storageService.getLastSessionState();
+        if (sessionState) {
+          storageService.saveSessionState({ ...sessionState, pendingCheckout: false });
+        }
+      } else {
+        // Check if error is due to already checked out or invalid status
+        const isStatusError = checkoutResult.errorCode === 'ALREADY_CHECKED_OUT' || 
+                              checkoutResult.errorCode === 'INVALID_STATUS' ||
+                              checkoutResult.reason?.includes('already checked out') ||
+                              checkoutResult.reason?.includes('current attendance status');
+        
+        if (isStatusError) {
+          console.log(`[AutoCheckout] Check-out not needed before sleep: ${checkoutResult.reason}`);
+          // User is already checked out - clear pending state
+          const sessionState = storageService.getLastSessionState();
+          if (sessionState) {
+            storageService.saveSessionState({ ...sessionState, pendingCheckout: false });
+          }
+        } else {
+          console.error(`[AutoCheckout] Check-out failed before sleep: ${checkoutResult.reason}`);
+          // Store pending checkout state only if it's a real error
+          const sessionState = storageService.getLastSessionState();
+          storageService.saveSessionState({
+            ...sessionState,
+            pendingCheckout: true,
+            sessionEndTimestamp: new Date(),
+          });
+        }
+      }
+    } else {
+      console.warn('[AutoCheckout] Check-out timed out');
+      // Store pending checkout state
+      const sessionState = storageService.getLastSessionState();
+      storageService.saveSessionState({
+        ...sessionState,
+        pendingCheckout: true,
+        sessionEndTimestamp: new Date(),
+      });
+    }
+  } catch (error: any) {
+    console.error('[AutoCheckout] Check-out error:', error);
+    // Store pending checkout state
+    const sessionState = storageService.getLastSessionState();
+    storageService.saveSessionState({
+      ...sessionState,
+      pendingCheckout: true,
+      sessionEndTimestamp: new Date(),
+    });
+  } finally {
+    isCheckingOut = false;
+    // STOP SLEEP BLOCKER - Allow sleep to proceed after check-out completes
+    stopSleepBlocker();
+  }
+}
+
+// Handle shutdown/logout event
+async function handleShutdownEvent(
+  event: Electron.Event | { preventDefault?: () => void },
+  trigger: 'shutdown' | 'logout'
+): Promise<void> {
+  // Prevent default shutdown behavior
+  if (event && typeof (event as any).preventDefault === 'function') {
+    (event as any).preventDefault();
+    shutdownEventPrevented = true;
+  }
+
+  // Check if feature is enabled
+  if (!configService.isAutoCheckoutOnShutdownEnabled()) {
+    console.log('[AutoCheckout] Auto check-out on shutdown is disabled');
+    allowShutdown();
+    return;
+  }
+
+  // Check if already checking out
+  if (isCheckingOut) {
+    console.log('[AutoCheckout] Check-out already in progress');
+    return;
+  }
+
+  // Check authentication
+  const isAuthenticated = await sessionService.isAuthenticated();
+  if (!isAuthenticated) {
+    console.log('[AutoCheckout] User not authenticated, skipping check-out');
+    allowShutdown();
+    return;
+  }
+
+  // Check attendance status
+  try {
+    const status = await apiService.getAttendanceStatus();
+    
+    if (status.status === 'NOT_STARTED') {
+      console.log('[AutoCheckout] User not checked in, skipping check-out');
+      allowShutdown();
+      return;
+    }
+
+    if (status.status === 'CHECKED_OUT') {
+      console.log('[AutoCheckout] User already checked out, skipping check-out');
+      allowShutdown();
+      return;
+    }
+
+    // User is checked in - SAVE PENDING STATE FIRST (safety mechanism)
+    // This ensures state is saved even if dialog doesn't show or system forces shutdown
+    const shutdownTimestamp = new Date();
+    const sessionState = storageService.getLastSessionState();
+    storageService.saveSessionState({
+      ...sessionState,
+      pendingCheckout: true,
+      sessionEndTimestamp: shutdownTimestamp,
+    });
+    storageService.markSessionEnd(shutdownTimestamp);
+    console.log('[AutoCheckout] Saved pending checkout state with timestamp:', shutdownTimestamp.toISOString());
+
+    // Now show dialog
+    await showCheckoutDialog(trigger);
+  } catch (error: any) {
+    console.error('[AutoCheckout] Failed to check attendance status:', error);
+    // On error, save pending state anyway (user might be checked in)
+    try {
+      const shutdownTimestamp = new Date();
+      const sessionState = storageService.getLastSessionState();
+      storageService.saveSessionState({
+        ...sessionState,
+        pendingCheckout: true,
+        sessionEndTimestamp: shutdownTimestamp,
+      });
+      storageService.markSessionEnd(shutdownTimestamp);
+      console.log('[AutoCheckout] Saved pending checkout state (error case)');
+    } catch (saveError) {
+      console.error('[AutoCheckout] Failed to save pending state:', saveError);
+    }
+    // On error, allow shutdown to proceed
+    allowShutdown();
+  }
+}
+
+// Show check-out dialog
+async function showCheckoutDialog(trigger: 'shutdown' | 'logout'): Promise<void> {
+  // Ensure window is visible
+  if (mainWindow && !mainWindow.isVisible()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  try {
+    const dialogOptions: Electron.MessageBoxOptions = {
+      type: 'question',
+      title: 'Check Out',
+      message: 'Are you checking out...?',
+      detail: 'You are currently checked in. Would you like to check out before shutting down?',
+      buttons: ['Check Out', 'Continue Anyway'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    };
+    
+    const dialogResult = mainWindow
+      ? await dialog.showMessageBox(mainWindow, dialogOptions)
+      : await dialog.showMessageBox(dialogOptions);
+
+    if (dialogResult.response === 0) {
+      // User selected "Check Out"
+      await performCheckoutOnShutdown(trigger);
+    } else {
+      // User selected "Continue Anyway"
+      console.log('[AutoCheckout] User chose to continue without check-out');
+      // State already saved in handleShutdownEvent, just allow shutdown
+      allowShutdown();
+    }
+  } catch (error) {
+    console.error('[AutoCheckout] Dialog error:', error);
+    // On error, allow shutdown
+    allowShutdown();
+  }
+}
+
+// Perform check-out on shutdown
+async function performCheckoutOnShutdown(trigger: 'shutdown' | 'logout'): Promise<void> {
+  isCheckingOut = true;
+  const timeout = configService.getCheckoutTimeout() * 1000; // Convert to milliseconds
+  const useFastMode = trigger === 'shutdown'; // Use fast mode for shutdown
+
+  try {
+    console.log(`[AutoCheckout] Attempting check-out (trigger: ${trigger}, fastMode: ${useFastMode})`);
+
+    // Create timeout promise
+    const timeoutPromise = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        console.warn(`[AutoCheckout] Check-out timeout after ${timeout}ms`);
+        resolve();
+      }, timeout);
+    });
+
+    // Create check-out promise
+    const checkoutPromise = autoCheckOutService.attemptCheckout(trigger, useFastMode);
+
+    // Race between check-out and timeout
+    const result = await Promise.race([
+      checkoutPromise.then(() => ({ success: true })),
+      timeoutPromise.then(() => ({ success: false, reason: 'Timeout' })),
+    ]);
+
+    if (result.success) {
+      const checkoutResult = await checkoutPromise;
+      if (checkoutResult.success) {
+        console.log('[AutoCheckout] Check-out successful');
+        // Clear pending checkout state (check-out completed successfully)
+        const sessionState = storageService.getLastSessionState();
+        if (sessionState) {
+          storageService.saveSessionState({ ...sessionState, pendingCheckout: false });
+        }
+      } else {
+        // Check if error is due to already checked out or invalid status
+        const isStatusError = checkoutResult.errorCode === 'ALREADY_CHECKED_OUT' || 
+                              checkoutResult.errorCode === 'INVALID_STATUS' ||
+                              checkoutResult.reason?.includes('already checked out') ||
+                              checkoutResult.reason?.includes('current attendance status');
+        
+        if (isStatusError) {
+          console.log(`[AutoCheckout] Check-out not needed: ${checkoutResult.reason}`);
+          // User is already checked out or in invalid status - clear pending state
+          const sessionState = storageService.getLastSessionState();
+          if (sessionState) {
+            storageService.saveSessionState({ ...sessionState, pendingCheckout: false });
+          }
+        } else {
+          console.error(`[AutoCheckout] Check-out failed: ${checkoutResult.reason}`);
+          // Show error but allow shutdown
+          if (mainWindow) {
+            dialog.showMessageBox(mainWindow, {
+              type: 'warning',
+              title: 'Check-out Failed',
+              message: `Check-out failed: ${checkoutResult.reason}`,
+              detail: 'The system will shut down anyway. You may need to manually check out later.',
+              buttons: ['OK'],
+            });
+          }
+          // Store pending checkout state only if it's a real error
+          const sessionState = storageService.getLastSessionState();
+          storageService.saveSessionState({
+            ...sessionState,
+            pendingCheckout: true,
+            sessionEndTimestamp: new Date(),
+          });
+        }
+      }
+    } else {
+      console.warn('[AutoCheckout] Check-out timed out, allowing shutdown');
+      // Store pending checkout state
+      const sessionState = storageService.getLastSessionState();
+      storageService.saveSessionState({
+        ...sessionState,
+        pendingCheckout: true,
+        sessionEndTimestamp: new Date(),
+      });
+    }
+  } catch (error: any) {
+    console.error('[AutoCheckout] Check-out error:', error);
+    // Store pending checkout state
+    const sessionState = storageService.getLastSessionState();
+    storageService.saveSessionState({
+      ...sessionState,
+      pendingCheckout: true,
+      sessionEndTimestamp: new Date(),
+    });
+  } finally {
+    isCheckingOut = false;
+    allowShutdown();
+  }
+}
+
+// Allow shutdown to proceed
+function allowShutdown(): void {
+  if (shutdownEventPrevented) {
+    shutdownEventPrevented = false;
+    appIsQuitting = true;
+    app.quit();
+  }
+}
+
+// Check for recovery check-out on app start - show dialog asking user
+async function checkRecoveryCheckout(): Promise<void> {
+  try {
+    const sessionState = storageService.getLastSessionState();
+    if (!sessionState) {
+      return;
+    }
+
+    // Check if there's a pending check-out
+    if (sessionState.pendingCheckout && sessionState.sessionEndTimestamp) {
+      console.log('[AutoCheckout] Found pending check-out from previous session');
+      
+      // Wait a bit for app to fully initialize
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Check if user is authenticated
+      const isAuthenticated = await sessionService.isAuthenticated();
+      if (!isAuthenticated) {
+        console.log('[AutoCheckout] User not authenticated, skipping recovery');
+        return;
+      }
+
+      // Check current attendance status
+      try {
+        const status = await apiService.getAttendanceStatus();
+        
+        // If still checked in, show dialog asking user
+        if (status.status === 'CHECKED_IN') {
+          // Format the shutdown time
+          const shutdownTime = new Date(sessionState.sessionEndTimestamp);
+          const timeString = shutdownTime.toLocaleString();
+          
+          // Ensure window is visible
+          if (mainWindow) {
+            if (!mainWindow.isVisible()) {
+              mainWindow.show();
+            }
+            mainWindow.focus();
+            mainWindow.moveTop();
+          }
+
+          // Show dialog asking user if they want to check out
+          const dialogOptions: Electron.MessageBoxOptions = {
+            type: 'question',
+            title: 'Previous Session Check-out',
+            message: 'Do you want to check out?',
+            detail: `You closed the system at ${timeString} without checking out. Would you like to check out now at that time?`,
+            buttons: ['Check Out', 'Skip'],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          };
+          
+          const dialogResult = mainWindow
+            ? await dialog.showMessageBox(mainWindow, dialogOptions)
+            : await dialog.showMessageBox(dialogOptions);
+
+          if (dialogResult.response === 0) {
+            // User selected "Check Out"
+            console.log('[AutoCheckout] User chose to check out from previous session');
+            
+            let networkInfo: NetworkInfo | undefined;
+            if (sessionState.lastNetworkInfo) {
+              if (sessionState.lastNetworkInfo.type === 'wifi') {
+                networkInfo = {
+                  type: 'wifi',
+                  wifi: {
+                    ssid: sessionState.lastNetworkInfo.ssid || '',
+                    bssid: sessionState.lastNetworkInfo.bssid || null,
+                  },
+                };
+              } else if (sessionState.lastNetworkInfo.type === 'ethernet') {
+                networkInfo = {
+                  type: 'ethernet',
+                  ethernet: {
+                    macAddress: sessionState.lastNetworkInfo.macAddress || '',
+                  },
+                };
+              }
+            }
+
+            // Use the saved shutdown time for check-out, not current time
+            const checkOutTime = new Date(sessionState.sessionEndTimestamp);
+            console.log(`[AutoCheckout] Checking out at saved time: ${checkOutTime.toISOString()}`);
+            
+            const result = await autoCheckOutService.attemptCheckout('recovery', false, networkInfo, checkOutTime);
+            
+            if (result.success) {
+              console.log('[AutoCheckout] Recovery check-out successful');
+              // Clear pending state
+              storageService.saveSessionState({
+                ...sessionState,
+                pendingCheckout: false,
+              });
+            } else {
+              console.error(`[AutoCheckout] Recovery check-out failed: ${result.reason}`);
+              // Show error to user
+              if (mainWindow) {
+                dialog.showMessageBox(mainWindow, {
+                  type: 'error',
+                  title: 'Check-out Failed',
+                  message: `Check-out failed: ${result.reason}`,
+                  buttons: ['OK'],
+                });
+              }
+            }
+          } else {
+            // User selected "Skip"
+            console.log('[AutoCheckout] User chose to skip recovery check-out');
+            // Clear pending state since user explicitly skipped
+            storageService.saveSessionState({
+              ...sessionState,
+              pendingCheckout: false,
+            });
+          }
+        } else if (status.status === 'CHECKED_OUT') {
+          // Already checked out, clear pending state
+          console.log('[AutoCheckout] Already checked out, clearing pending state');
+          storageService.saveSessionState({
+            ...sessionState,
+            pendingCheckout: false,
+          });
+        }
+      } catch (error: any) {
+        console.error('[AutoCheckout] Failed to check attendance status during recovery:', error);
+      }
+    }
+  } catch (error: any) {
+    console.error('[AutoCheckout] Recovery check-out error:', error);
+  }
+}
+
+
+// Configure auto-updater
 function setupAutoUpdater(): void {
+  // Disable auto-download (we'll handle it manually)
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  if (!isDev) {
-    // Check for updates 30 seconds after startup (not blocking)
-    setTimeout(() => {
-      autoUpdater.checkForUpdates().catch(() => {
-        // Silently fail - updates aren't critical
-      });
-    }, 30000);
+  // GitHub provider is automatically configured from package.json
+  // No need to setFeedURL when using GitHub provider
+  // electron-updater will automatically detect GitHub releases
 
+  // Check for updates on startup (only in production)
+  if (!isDev) {
+    // Check immediately after a short delay
+    setTimeout(() => {
+      autoUpdater.checkForUpdates();
+    }, 5000); // Wait 5 seconds after app starts
+
+    // Then check periodically (every 4 hours)
     setInterval(() => {
       autoUpdater.checkForUpdates();
-    }, 4 * 60 * 60 * 1000);
+    }, 4 * 60 * 60 * 1000); // 4 hours
   }
 
   // Handle update available
@@ -531,50 +1040,61 @@ if (!gotTheLock) {
 } else {
   // Handle when a second instance is attempted
   app.on('second-instance', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    // Someone tried to run a second instance, focus our window instead
+    if (mainWindow) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
       }
       mainWindow.show();
       mainWindow.focus();
     } else {
+      // Window was destroyed, create a new one
       createWindow();
-      windowCreated = true;
     }
   });
 
-  // REVOLUTIONARY: Ultra-fast startup - only tray, no window
+  // This method will be called when Electron has finished initialization
   app.whenReady().then(() => {
-    console.log('[Main] App ready - starting ultra-fast initialization...');
-
-    // Lightweight operations only
+    // Set app icon after app is ready
     const iconPath = getIconPath();
     if (iconPath) {
+      // Set dock icon for macOS
       if (process.platform === 'darwin' && app.dock) {
         app.dock.setIcon(iconPath);
       }
+
+      // Set app user model ID for Windows (helps with taskbar icon)
       if (process.platform === 'win32') {
         app.setAppUserModelId('com.hrms.desktop');
       }
     }
 
-    setupAutoStart(); // Lightweight
-    createTray(); // INSTANT - this is all user sees
+    // Setup auto-updater
+    setupAutoUpdater();
 
-    // Setup IPC handlers (lightweight)
-    setupIpcHandlers();
+    // Setup auto-start
+    setupAutoStart();
 
-    // If not starting hidden, create window immediately
-    // Otherwise, window is created on-demand when user clicks tray
-    if (!shouldStartHidden) {
-      createWindow();
-      windowCreated = true;
-    }
+    // Setup auto attendance system
+    setupAutoAttendance();
+
+    // Setup auto check-out on shutdown/logout
+    setupAutoCheckout();
+
+    // Create system tray first
+    createTray();
+
+    // Create main window
+    createWindow();
+
+    // Set main window reference for session service
+    sessionService.setMainWindow(mainWindow);
 
     app.on('activate', () => {
+      // On macOS, re-create window when dock icon is clicked
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
-        windowCreated = true;
+        sessionService.setMainWindow(mainWindow);
       } else if (mainWindow) {
         if (mainWindow.isMinimized()) {
           mainWindow.restore();
@@ -583,8 +1103,6 @@ if (!gotTheLock) {
         mainWindow.focus();
       }
     });
-
-    console.log('[Main] Ultra-fast startup complete! Tray icon ready.');
   });
 }
 
@@ -597,7 +1115,7 @@ if (!gotTheLock) {
  */
 async function getEthernetMacAddress(): Promise<{ macAddress: string | null; adapterName?: string }> {
   const platform = process.platform;
- 
+  console.log(`[DEBUG] getEthernetMacAddress() called on platform: ${platform}`);
 
   try {
     if (platform === 'win32') {
@@ -677,10 +1195,10 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
         }
 
         // Return first adapter (prioritizes those with IP addresses)
- 
+        console.log(`[DEBUG] Found ${activeAdapters.length} Ethernet adapter(s):`, activeAdapters.map(a => `${a.name} (${a.mac})`).join(', '));
         if (activeAdapters.length > 0) {
           const adapter = activeAdapters[0];
- 
+          console.log(`[DEBUG] ✓ Selected Ethernet adapter: ${adapter.name} (${adapter.mac})`);
           return { macAddress: adapter.mac, adapterName: adapter.name };
         }
 
@@ -717,10 +1235,10 @@ async function getEthernetMacAddress(): Promise<{ macAddress: string | null; ada
               // Keep Ethernet adapters (including USB)
               if (/ethernet/i.test(connectionName) || /ethernet|usb.*gb/i.test(adapterName)) {
                 const mac = macAddress.replace(/-/g, ':').toUpperCase();
- 
+                console.log(`[DEBUG] ✓ Found Ethernet adapter via getmac: ${adapterName} (${mac})`);
                 return { macAddress: mac, adapterName: adapterName };
               } else {
- 
+                console.log(`[DEBUG] Skipping adapter (not Ethernet): ${connectionName} / ${adapterName}`);
               }
             }
           }
@@ -938,106 +1456,97 @@ async function getCurrentWifiLocal(): Promise<WifiInfo> {
   return { ssid: null, bssid: null };
 }
 
-// IPC Handlers - lazy loaded (only setup when needed)
-function setupIpcHandlers(): void {
-  // Only setup IPC when window is created (lazy)
-  if (ipcMain.listenerCount('auto-attendance:on-login') > 0) {
-    return; // Already set up
+// Register IPC handlers for network detection
+// These use the utility functions from network.util.ts
+
+ipcMain.handle('get-current-wifi', async (): Promise<WifiInfo> => {
+  return getCurrentWifi();
+});
+
+ipcMain.handle('get-current-network', async (): Promise<NetworkInfo> => {
+  return getCurrentNetwork();
+});
+
+// Handle opening logs viewer
+ipcMain.handle('open-logs-viewer', async () => {
+  if (mainWindow) {
+    mainWindow.webContents.send('open-logs-viewer');
+    return true;
+  }
+  return false;
+});
+
+// Auto attendance IPC handlers
+ipcMain.handle('auto-attendance:on-login', async () => {
+  console.log('[AutoAttendance] Received login check-in request');
+  try {
+    const result = await autoAttendanceService.attemptAutoCheckIn('login');
+    console.log(`[AutoAttendance] Login check-in result: ${result.success ? 'SUCCESS' : 'FAILED'} - ${result.reason || 'N/A'}`);
+    return result;
+  } catch (error: any) {
+    console.error('[AutoAttendance] Login check-in failed with error:', error);
+    return {
+      success: false,
+      trigger: 'login',
+      reason: error.message || 'Unknown error',
+      timestamp: new Date(),
+    };
+  }
+});
+
+// Handle auto check-in after auth initialization (when user has saved session)
+ipcMain.handle('auto-attendance:on-auth-init', async () => {
+  console.log('[AutoAttendance] Received auth-init check-in request');
+  try {
+    const result = await autoAttendanceService.attemptAutoCheckIn('app_start');
+    console.log(`[AutoAttendance] Auth-init check-in result: ${result.success ? 'SUCCESS' : 'FAILED'} - ${result.reason || 'N/A'}`);
+    return result;
+  } catch (error: any) {
+    console.error('[AutoAttendance] Auth init check-in failed with error:', error);
+    return {
+      success: false,
+      trigger: 'app_start',
+      reason: error.message || 'Unknown error',
+      timestamp: new Date(),
+    };
+  }
+});
+
+// Handle getting log file path
+ipcMain.handle('get-log-path', async () => {
+  const logPath = path.join(app.getPath('logs'), 'main.log');
+  return logPath;
+});
+
+// Handle getting API base URL from renderer process
+ipcMain.handle('get-api-base-url', async () => {
+  if (!mainWindow) {
+    console.warn('[Main] Cannot get API base URL: mainWindow is null');
+    return 'http://localhost:3001/api/v1'; // Default fallback
   }
 
-  // Register IPC handlers for network detection
-  ipcMain.handle('get-current-wifi', async (): Promise<WifiInfo> => {
-    return getCurrentWifi();
-  });
-
-  ipcMain.handle('get-current-network', async (): Promise<NetworkInfo> => {
-    return getCurrentNetwork();
-  });
-
-  // Handle opening logs viewer
-  ipcMain.handle('open-logs-viewer', async () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('open-logs-viewer');
-      return true;
-    }
-    return false;
-  });
-
-  // Auto attendance IPC handlers
-  ipcMain.handle('auto-attendance:on-login', async () => {
-    console.log('[AutoAttendance] Received login check-in request');
-    try {
-      const autoAttendSvc = getAutoAttendanceService();
-      const result = await autoAttendSvc.attemptAutoCheckIn('login');
- 
-      return result;
-    } catch (error: any) {
-      console.error('[AutoAttendance] Login check-in failed with error:', error);
-      return {
-        success: false,
-        trigger: 'login',
-        reason: error.message || 'Unknown error',
-        timestamp: new Date(),
-      };
-    }
-  });
-
-  // Handle auto check-in after auth initialization (when user has saved session)
-  ipcMain.handle('auto-attendance:on-auth-init', async () => {
-    console.log('[AutoAttendance] Received auth-init check-in request');
-    try {
-      const autoAttendSvc = getAutoAttendanceService();
-      const result = await autoAttendSvc.attemptAutoCheckIn('app_start');
- 
-      return result;
-    } catch (error: any) {
-      console.error('[AutoAttendance] Auth init check-in failed with error:', error);
-      return {
-        success: false,
-        trigger: 'app_start',
-        reason: error.message || 'Unknown error',
-        timestamp: new Date(),
-      };
-    }
-  });
-
-  // Handle getting log file path
-  ipcMain.handle('get-log-path', async () => {
-    const logPath = path.join(app.getPath('logs'), 'main.log');
-    return logPath;
-  });
-
-  // Handle getting API base URL from renderer process
-  ipcMain.handle('get-api-base-url', async () => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      console.warn('[Main] Cannot get API base URL: mainWindow is null');
-      return 'http://localhost:3001/api/v1'; // Default fallback
-    }
-
-    try {
-      // Read the API base URL from the renderer's window global variable
-      // The renderer sets window.__API_BASE_URL__ from config.api.baseURL
-      const apiBaseUrl = await mainWindow.webContents.executeJavaScript(`
-        (() => {
-          try {
-            // Get from window.__API_BASE_URL__ set by renderer's main.tsx
-            return window.__API_BASE_URL__ || 'http://localhost:3001/api/v1';
-          } catch (error) {
-            console.error('Failed to get API base URL:', error);
-            return 'http://localhost:3001/api/v1';
-          }
-        })()
-      `);
-      
-      console.log('[Main] Got API base URL from renderer:', apiBaseUrl);
-      return apiBaseUrl;
-    } catch (error) {
-      console.error('[Main] Failed to get API base URL from renderer:', error);
-      return 'http://localhost:3001/api/v1'; // Default fallback
-    }
-  });
-}
-
+  try {
+    // Read the API base URL from the renderer's window global variable
+    // The renderer sets window.__API_BASE_URL__ from config.api.baseURL
+    const apiBaseUrl = await mainWindow.webContents.executeJavaScript(`
+      (() => {
+        try {
+          // Get from window.__API_BASE_URL__ set by renderer's main.tsx
+          return window.__API_BASE_URL__ || 'http://localhost:3001/api/v1';
+        } catch (error) {
+          console.error('Failed to get API base URL:', error);
+          return 'http://localhost:3001/api/v1';
+        }
+      })()
+    `);
+    
+    console.log('[Main] Got API base URL from renderer:', apiBaseUrl);
+    return apiBaseUrl;
+  } catch (error) {
+    console.error('[Main] Failed to get API base URL from renderer:', error);
+    return 'http://localhost:3001/api/v1'; // Default fallback
+  }
+});
 
 // Export getCurrentNetwork for auto-attendance service (re-export from utils)
 export { getCurrentNetwork, NetworkInfo } from './utils/network.util';
@@ -1048,11 +1557,42 @@ app.on('window-all-closed', () => {
   // Only quit explicitly via tray menu or app.quit()
 });
 
-// Handle app quitting
+// Handle app quitting - Final safety net to save state if not already saved
 app.on('before-quit', () => {
-  appIsQuitting = true;
-  if (mainWindow) {
-    mainWindow.removeAllListeners('close');
+  // Only set flag if not already handling checkout
+  if (!isCheckingOut) {
+    appIsQuitting = true;
+    if (mainWindow) {
+      mainWindow.removeAllListeners('close');
+    }
+    
+    // Final safety net: If user is checked in and state not saved, save it now
+    // This handles cases where shutdown happens too fast
+    (async () => {
+      try {
+        const isAuthenticated = await sessionService.isAuthenticated();
+        if (isAuthenticated) {
+          const status = await apiService.getAttendanceStatus();
+          if (status.status === 'CHECKED_IN') {
+            const sessionState = storageService.getLastSessionState();
+            // Only save if not already saved
+            if (!sessionState?.pendingCheckout || !sessionState?.sessionEndTimestamp) {
+              const shutdownTimestamp = new Date();
+              storageService.saveSessionState({
+                ...sessionState,
+                pendingCheckout: true,
+                sessionEndTimestamp: shutdownTimestamp,
+              });
+              storageService.markSessionEnd(shutdownTimestamp);
+              console.log('[AutoCheckout] Final safety net: Saved pending checkout state');
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore errors in final safety net
+        console.error('[AutoCheckout] Final safety net error:', error);
+      }
+    })();
   }
 });
 

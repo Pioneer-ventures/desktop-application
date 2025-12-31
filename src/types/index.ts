@@ -70,6 +70,7 @@ export interface CheckOutRequest {
     macAddress: string;
   };
   systemFingerprint?: string;
+  checkOutTime?: string; // ISO string - optional, for recovery check-outs at specific time
 }
 
 export interface AttendanceDashboardData {

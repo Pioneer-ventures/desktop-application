@@ -44,6 +44,19 @@ interface CheckInRequest {
   systemFingerprint?: string;
 }
 
+interface CheckOutRequest {
+  source: string;
+  wifi?: {
+    ssid: string;
+    bssid?: string;
+  };
+  ethernet?: {
+    macAddress: string;
+  };
+  systemFingerprint?: string;
+  checkOutTime?: string; // ISO string - optional, for recovery check-outs at specific time
+}
+
 interface WifiValidationRequest {
   ssid?: string;
   bssid?: string;
@@ -235,6 +248,29 @@ class ApiService {
       return response.data.data;
     } catch (error: any) {
       console.error('[ApiService] Failed to check in:', error);
+      
+      // Extract user-friendly error message
+      const errorMessage = this.extractErrorMessage(error);
+      
+      // Create a custom error with the message
+      const customError: any = new Error(errorMessage);
+      customError.statusCode = error.response?.status || 500;
+      customError.response = error.response;
+      
+      throw customError;
+    }
+  }
+
+  /**
+   * Check out
+   */
+  async checkOut(request: CheckOutRequest): Promise<AttendanceRecord> {
+    await this.ensureBaseUrl();
+    try {
+      const response = await this.instance.post('/attendance/check-out', request);
+      return response.data.data;
+    } catch (error: any) {
+      console.error('[ApiService] Failed to check out:', error);
       
       // Extract user-friendly error message
       const errorMessage = this.extractErrorMessage(error);

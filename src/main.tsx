@@ -1,12 +1,13 @@
 /**
- * Ultra-fast entry point with progressive loading
+ * Application Entry Point
  */
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import App from './App';
 import { config } from './config';
 
-// Expose API base URL immediately (before React loads)
+// Expose API base URL to window for Electron main process to access
 declare global {
   interface Window {
     __API_BASE_URL__?: string;
@@ -15,31 +16,9 @@ declare global {
 
 window.__API_BASE_URL__ = config.api.baseURL;
 
-// Lazy load the heavy App component (progressive loading)
-const App = React.lazy(() => import('./App'));
-
-// Show loading state immediately
-const root = ReactDOM.createRoot(document.getElementById('root')!);
-
-root.render(
+ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <React.Suspense 
-      fallback={
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '100vh',
-          fontSize: '14px',
-          color: '#666',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-        }}>
-          Loading...
-        </div>
-      }
-    >
-      <App />
-    </React.Suspense>
+    <App />
   </React.StrictMode>
 );
 
