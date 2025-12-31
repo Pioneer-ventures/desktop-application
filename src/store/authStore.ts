@@ -36,18 +36,10 @@ export const authStore = create<AuthStore>()(
         });
 
         // Trigger auto check-in on login success
-        console.log('[AuthStore] Login successful, triggering auto check-in...');
         if (window.electronAPI?.triggerAutoCheckInOnLogin) {
-          console.log('[AuthStore] electronAPI.triggerAutoCheckInOnLogin available, calling...');
-          window.electronAPI.triggerAutoCheckInOnLogin()
-            .then((result) => {
-              console.log('[AuthStore] Auto check-in on login triggered successfully:', result);
-            })
-            .catch((error) => {
-              console.error('[AuthStore] Failed to trigger auto check-in on login:', error);
-            });
-        } else {
-          console.warn('[AuthStore] electronAPI.triggerAutoCheckInOnLogin not available!');
+          window.electronAPI.triggerAutoCheckInOnLogin().catch((error) => {
+            console.error('[AuthStore] Failed to trigger auto check-in on login:', error);
+          });
         }
       },
 
@@ -72,18 +64,10 @@ export const authStore = create<AuthStore>()(
           });
 
           // Trigger auto check-in after successful auth initialization
-          console.log('[AuthStore] Auth initialization successful, triggering auto check-in...');
           if (window.electronAPI?.triggerAutoCheckInOnAuthInit) {
-            console.log('[AuthStore] electronAPI.triggerAutoCheckInOnAuthInit available, calling...');
-            window.electronAPI.triggerAutoCheckInOnAuthInit()
-              .then((result) => {
-                console.log('[AuthStore] Auto check-in triggered successfully:', result);
-              })
-              .catch((error) => {
-                console.error('[AuthStore] Failed to trigger auto check-in on auth init:', error);
-              });
-          } else {
-            console.warn('[AuthStore] electronAPI.triggerAutoCheckInOnAuthInit not available!');
+            window.electronAPI.triggerAutoCheckInOnAuthInit().catch((error) => {
+              console.error('[AuthStore] Failed to trigger auto check-in on auth init:', error);
+            });
           }
         } catch (error) {
           // Session invalid, clear auth state

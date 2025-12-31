@@ -27,6 +27,7 @@ export interface ElectronAPI {
   getLogPath: () => Promise<string>;
   triggerAutoCheckInOnLogin: () => Promise<any>;
   triggerAutoCheckInOnAuthInit: () => Promise<any>;
+  getApiBaseUrl: () => Promise<string>;
 }
 
 declare global {

@@ -50,6 +50,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   triggerAutoCheckInOnAuthInit: (): Promise<any> => {
     return ipcRenderer.invoke('auto-attendance:on-auth-init');
   },
+  
+  // Get API base URL from renderer (which has access to Vite env vars)
+  getApiBaseUrl: (): Promise<string> => {
+    return ipcRenderer.invoke('get-api-base-url');
+  },
 });
 
 // Listen for IPC messages from main process

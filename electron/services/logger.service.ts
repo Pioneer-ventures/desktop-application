@@ -69,7 +69,7 @@ class LoggerService {
 
     // Also log to console in development
     if (process.env.NODE_ENV === 'development') {
-      console.log(`[AutoAttendance] ${entry.trim()}`);
+ 
     }
   }
 

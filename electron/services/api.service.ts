@@ -56,16 +56,17 @@ interface WifiValidationResponse {
   wifiNetworkId?: string;
 }
 
-// Get API base URL from environment or use default
-const API_BASE_URL = process.env.VITE_API_BASE_URL || 'http://localhost:3001/api/v1';
 const API_TIMEOUT = 30000;
 
 class ApiService {
   private instance: AxiosInstance;
+  private apiBaseUrl: string | null = null;
+  private baseUrlPromise: Promise<string> | null = null;
 
   constructor() {
+    // Initialize with a placeholder - will be updated from renderer
     this.instance = axios.create({
-      baseURL: API_BASE_URL,
+      baseURL: 'http://localhost:3001/api/v1', // Temporary default
       timeout: API_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
@@ -73,6 +74,76 @@ class ApiService {
     });
 
     this.setupInterceptors();
+  }
+
+  /**
+   * Get API base URL from renderer process (cached after first call)
+   */
+  private async getApiBaseUrl(): Promise<string> {
+    // Return cached URL if available
+    if (this.apiBaseUrl) {
+      return this.apiBaseUrl;
+    }
+
+    // If there's already a request in progress, wait for it
+    if (this.baseUrlPromise) {
+      return this.baseUrlPromise;
+    }
+
+    // Create new promise to fetch URL
+    this.baseUrlPromise = (async () => {
+      try {
+        const { BrowserWindow } = require('electron');
+        const mainWindow = BrowserWindow.getAllWindows()[0];
+        
+        if (!mainWindow) {
+          console.warn('[ApiService] Main window not available, using default API URL');
+          return 'http://localhost:3001/api/v1';
+        }
+
+        // Wait for window to be ready if needed
+        if (mainWindow.webContents.isLoading()) {
+          await new Promise<void>((resolve) => {
+            mainWindow.webContents.once('did-finish-load', () => resolve());
+          });
+        }
+
+        // Small delay to ensure renderer has set the global variable
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const apiBaseUrl = await mainWindow.webContents.executeJavaScript(`
+          (() => {
+            try {
+              return window.__API_BASE_URL__ || 'http://localhost:3001/api/v1';
+            } catch (error) {
+              console.error('Failed to get API base URL:', error);
+              return 'http://localhost:3001/api/v1';
+            }
+          })()
+        `);
+        
+        console.log('[ApiService] Got API base URL from renderer:', apiBaseUrl);
+        this.apiBaseUrl = apiBaseUrl;
+        this.instance.defaults.baseURL = apiBaseUrl;
+        return apiBaseUrl;
+      } catch (error) {
+        console.error('[ApiService] Failed to get API base URL from renderer:', error);
+        const defaultUrl = 'http://localhost:3001/api/v1';
+        this.apiBaseUrl = defaultUrl;
+        return defaultUrl;
+      } finally {
+        this.baseUrlPromise = null;
+      }
+    })();
+
+    return this.baseUrlPromise;
+  }
+
+  /**
+   * Ensure API base URL is set before making requests
+   */
+  private async ensureBaseUrl(): Promise<void> {
+    await this.getApiBaseUrl();
   }
 
   /**
@@ -114,20 +185,12 @@ class ApiService {
    * Get attendance status
    */
   async getAttendanceStatus(): Promise<AttendanceStatusResponse> {
-    console.log('[ApiService] Getting attendance status...');
+    await this.ensureBaseUrl();
     try {
-      const token = await sessionService.getAccessToken();
-      console.log(`[ApiService] Access token available for status check: ${!!token}`);
-      
       const response = await this.instance.get('/attendance/status');
-      console.log('[ApiService] Attendance status response:', JSON.stringify(response.data, null, 2));
       return response.data.data;
-    } catch (error: any) {
-      console.error('[ApiService] Failed to get attendance status:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
-      });
+    } catch (error) {
+      console.error('[ApiService] Failed to get attendance status:', error);
       throw error;
     }
   }
@@ -136,20 +199,12 @@ class ApiService {
    * Validate network (WiFi or Ethernet)
    */
   async validateNetwork(request: WifiValidationRequest): Promise<WifiValidationResponse> {
-    console.log('[ApiService] Validating network with request:', JSON.stringify(request, null, 2));
+    await this.ensureBaseUrl();
     try {
-      const token = await sessionService.getAccessToken();
-      console.log(`[ApiService] Access token available for network validation: ${!!token}`);
-      
       const response = await this.instance.post('/wifi/validate', request);
-      console.log('[ApiService] Network validation response:', JSON.stringify(response.data, null, 2));
       return response.data.data;
-    } catch (error: any) {
-      console.error('[ApiService] Failed to validate network:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
-      });
+    } catch (error) {
+      console.error('[ApiService] Failed to validate network:', error);
       throw error;
     }
   }
@@ -174,31 +229,12 @@ class ApiService {
    * Check in
    */
   async checkIn(request: CheckInRequest): Promise<AttendanceRecord> {
-    console.log('[ApiService] Calling check-in API...');
-    console.log('[ApiService] Check-in request:', JSON.stringify(request, null, 2));
-    
+    await this.ensureBaseUrl();
     try {
-      // Get access token before making request
-      const token = await sessionService.getAccessToken();
-      console.log(`[ApiService] Access token available: ${!!token}, length: ${token?.length || 0}`);
-      
       const response = await this.instance.post('/attendance/check-in', request);
-      console.log('[ApiService] ✅ Check-in API call successful');
-      console.log('[ApiService] Response:', JSON.stringify(response.data, null, 2));
       return response.data.data;
     } catch (error: any) {
-      console.error('[ApiService] ❌ Check-in API call failed');
-      console.error('[ApiService] Error details:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        config: {
-          url: error.config?.url,
-          method: error.config?.method,
-          headers: error.config?.headers ? Object.keys(error.config.headers) : null,
-        }
-      });
+      console.error('[ApiService] Failed to check in:', error);
       
       // Extract user-friendly error message
       const errorMessage = this.extractErrorMessage(error);

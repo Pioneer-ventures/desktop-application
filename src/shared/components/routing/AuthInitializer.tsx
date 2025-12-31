@@ -13,15 +13,8 @@ export const AuthInitializer: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => {
     const init = async () => {
-      console.log('[AuthInitializer] Starting auth initialization...');
-      try {
-        await initializeAuth();
-        console.log('[AuthInitializer] Auth initialization completed');
-        setIsInitialized(true);
-      } catch (error) {
-        console.error('[AuthInitializer] Auth initialization failed:', error);
-        setIsInitialized(true); // Still set initialized to prevent infinite loading
-      }
+      await initializeAuth();
+      setIsInitialized(true);
     };
 
     init();
