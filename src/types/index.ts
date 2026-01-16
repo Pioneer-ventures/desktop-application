@@ -9,6 +9,64 @@ export enum UserRole {
   ADMIN = 'admin',
 }
 
+// User interface
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  department?: string;
+  branchId?: string;
+  branchDepartments?: string[];
+  phoneNumber?: string;
+  address?: string;
+  employeeId?: string;
+  designation?: string;
+  isActive?: boolean;
+  canActAsProxy?: boolean;
+}
+
+// Auth types
+export interface AuthState {
+  user: User | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  isAuthenticated: boolean;
+}
+
+export interface LoginRequest {
+  email?: string;
+  phoneNumber?: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface RefreshTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+}
+
+// Proxy types
+export interface ProxyPermission {
+  canActAsProxy: boolean;
+}
+
+export interface ProxyServerStatus {
+  isRunning: boolean;
+  port: number;
+  ipAddress: string | null;
+  connectedClients: number;
+  isRegistered?: boolean;
+  lastRegistrationAttempt?: string | null;
+  lastRegistrationError?: string | null;
+  mainServerUrl?: string;
+}
+
 // Attendance enums
 export enum AttendanceSessionStatus {
   NOT_STARTED = 'NOT_STARTED',
@@ -41,6 +99,7 @@ export interface AttendanceStatusResponse {
   today?: AttendanceRecord;
   canCheckIn: boolean;
   canCheckOut: boolean;
+  allowMultipleCheckIns?: boolean; // Whether multiple check-ins per day are allowed for the shift
 }
 
 export interface CheckInRequest {
@@ -62,6 +121,11 @@ export interface CheckInRequest {
 
 export interface CheckOutRequest {
   source: AttendanceSource;
+  location?: {
+    latitude?: number;
+    longitude?: number;
+    address?: string;
+  };
   wifi?: {
     ssid: string;
     bssid?: string;
@@ -109,6 +173,46 @@ export interface AttendanceDashboardData {
 // Re-export shift types
 export * from './shift';
 
+// Branch types
+export interface Branch {
+  id: string;
+  name: string;
+  code: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  branchManager?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  departments: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateBranchRequest {
+  name: string;
+  code: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  branchManager?: string; // User ID
+  departments?: string[];
+}
+
+export interface UpdateBranchRequest {
+  name?: string;
+  code?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  branchManager?: string; // User ID
+  departments?: string[];
+  isActive?: boolean;
+}
+
 // Employee Details enums and types
 export enum EmploymentType {
   FULL_TIME = 'full_time',
@@ -140,6 +244,7 @@ export interface EmployeeDetails {
   role: UserRole;
   designation?: string;
   department?: string;
+  branchId?: string;
   reportingManager?: {
     id: string;
     name: string;
@@ -180,6 +285,7 @@ export interface EmployeeDetails {
   overtimeEligibilityOverride?: boolean;
   breakRuleOverride?: boolean;
   holidayWorkingPermission?: boolean;
+  canActAsProxy?: boolean;
   
   // System & Audit (read-only)
   createdAt: string;
@@ -200,6 +306,7 @@ export interface UpdateEmployeeDetailsRequest {
   role?: UserRole;
   designation?: string;
   department?: string;
+  branchId?: string;
   reportingManagerId?: string;
   employmentType?: EmploymentType;
   dateOfJoining?: string;
@@ -230,6 +337,7 @@ export interface UpdateEmployeeDetailsRequest {
   overtimeEligibilityOverride?: boolean;
   breakRuleOverride?: boolean;
   holidayWorkingPermission?: boolean;
+  canActAsProxy?: boolean;
   
   // Optional reason for audit
   reason?: string;
